@@ -122,12 +122,14 @@ if new_count > st.session_state["last_count"]:
     pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
     for i in range(st.session_state["last_count"], new_count):
         p = pagos_sorted.iloc[i]
+        placeholder = st.sidebar.empty()
         st.session_state["pending_notifications"].append(
             {
                 "time": datetime.now(),
                 "Miembro": p["Miembro"],
                 "Cantidad": p["Cantidad"],
                 "Dias": p["Dias"],
+                "placeholder": placeholder,
             }
         )
     st.session_state["last_count"] = new_count
@@ -135,17 +137,16 @@ elif new_count < st.session_state["last_count"]:
     st.session_state["last_count"] = new_count
 
 now = datetime.now()
-filtered = [
-    n
-    for n in st.session_state["pending_notifications"]
-    if (now - n["time"]).total_seconds() < 30
-]
+filtered = []
+for n in st.session_state["pending_notifications"]:
+    if (now - n["time"]).total_seconds() < 30:
+        n["placeholder"].info(
+            f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
+        )
+        filtered.append(n)
+    else:
+        n["placeholder"].empty()
 st.session_state["pending_notifications"] = filtered
-
-for n in filtered:
-    st.sidebar.info(
-        f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
-    )
 
 st.header("🔑 Panel de Administración")
 last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
@@ -199,24 +200,26 @@ df_cap = (
 df_cap = df_cap.sort_values("Fecha")
 cols = st.columns(6, gap="small")
 for idx, r in enumerate(df_cap.itertuples()):
-    fn = r.Captura or ""
+    fn = r.Captura
     if fn:
         path = os.path.join(SCREENSHOT_DIR, fn)
         if os.path.exists(path):
             col = cols[idx % 6]
             col.image(path, width=150)
             col.markdown(
-                f"<div style='text-align:center;'><strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}</div>",
+                f"<div style='text-align:left;'><strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}</div>",
                 unsafe_allow_html=True,
             )
-options = [""] + [
-    f"{r.Miembro} — {r.Fecha:%Y-%m-%d}" for r in df_cap.itertuples() if r.Captura
-]
-paths = {
-    opt: os.path.join(SCREENSHOT_DIR, fn)
-    for opt, fn in zip(options[1:], df_cap["Captura"])
-    if fn
-}
+
+options = [""]
+paths = {}
+for r in df_cap.itertuples():
+    fn = r.Captura
+    if fn:
+        opt = f"{r.Miembro} — {r.Fecha:%Y-%m-%d}"
+        options.append(opt)
+        paths[opt] = os.path.join(SCREENSHOT_DIR, fn)
+
 sel = st.selectbox("Selecciona captura para ampliar:", options)
 if sel:
     st.image(paths[sel], use_container_width=True)
