@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import os
+import zipfile
 from datetime import datetime, date
-from math import floor
 
 CONFIG_FILE = "config.csv"
 EXCEL_FILE = "payments.xlsx"
@@ -31,6 +31,16 @@ def compute_overdue_days(last_expiry: date) -> int:
     dias = (date.today() - last_expiry).days
     return dias if dias > 0 else 0
 
+
+def create_empty_payments() -> pd.DataFrame:
+    """Crea un DataFrame vacío y guarda un nuevo payments.xlsx válido."""
+    df0 = pd.DataFrame(
+        columns=["Timestamp", "Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
+    )
+    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
+        df0.to_excel(writer, sheet_name="Pagos", index=False)
+    return df0
+
 if not os.path.exists(CONFIG_FILE):
     st.error(f"No existe {CONFIG_FILE}")
     st.stop()
@@ -39,17 +49,17 @@ config = pd.read_csv(CONFIG_FILE)
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 if not os.path.exists(EXCEL_FILE):
-    df0 = pd.DataFrame(
-        columns=["Timestamp", "Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
-    )
-    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-        df0.to_excel(writer, sheet_name="Pagos", index=False)
+    pagos_df = create_empty_payments()
+else:
+    try:
+        pagos_df = pd.read_excel(
+            EXCEL_FILE, sheet_name="Pagos", parse_dates=["Timestamp", "Fecha"]
+        )
+    except (zipfile.BadZipFile, ValueError):
+        st.warning("⚠️ El archivo de pagos está corrupto o inválido. Se crea uno nuevo.")
+        pagos_df = create_empty_payments()
 
-pagos_df = pd.read_excel(
-    EXCEL_FILE, sheet_name="Pagos", parse_dates=["Timestamp", "Fecha"]
-)
 st.set_page_config(layout="wide")
-
 st.title("💰 Control de Donaciones del Gremio")
 
 st.sidebar.header("Acceso")
@@ -59,6 +69,7 @@ if role == "Miembro":
     cantidad_str = st.text_input("Cantidad pagada (ej. 50qi, 1sx, 2sp)", value="50qi")
     qi_dia_str = st.text_input("Qi por día (ej. 50qi)", value="50qi")
     captura = st.file_uploader("Sube tu captura (PNG/JPG)", type=["png", "jpg", "jpeg"])
+
     if st.button("Registrar pago"):
         try:
             cantidad = parse_quantity(cantidad_str)
@@ -74,6 +85,7 @@ if role == "Miembro":
                     ruta = os.path.join(SCREENSHOT_DIR, nombre)
                     with open(ruta, "wb") as f:
                         f.write(captura.getbuffer())
+
                 nuevo = {
                     "Timestamp": ts,
                     "Fecha": ts.date(),
@@ -89,7 +101,7 @@ if role == "Miembro":
                     pagos_df.to_excel(writer, sheet_name="Pagos", index=False)
                 st.success(f"Registrado {dias} día(s) ({format_quantity(cantidad)})")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error al registrar el pago: {e}")
     st.stop()
 
 pw_input = st.sidebar.text_input("Contraseña de admin", type="password").strip()
@@ -128,10 +140,11 @@ dias_filter = st.slider(
 )
 
 mask = []
-for idx, pago in pagos_df.iterrows():
+for _, pago in pagos_df.iterrows():
     last_expiry = pago["Fecha"].date() + pd.Timedelta(days=int(pago["Dias"]) - 1)
     overdue = compute_overdue_days(last_expiry)
     mask.append(overdue >= dias_filter)
+
 tabla = pagos_df.loc[mask].copy()
 
 page_size = st.number_input("Filas por página", min_value=5, max_value=50, value=10)
@@ -145,8 +158,9 @@ view["Timestamp"] = view["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
 view["Fecha"] = view["Fecha"].dt.strftime("%Y-%m-%d")
 
 edited = st.experimental_data_editor(view, num_rows="dynamic", use_container_width=True)
+
 if st.button("Guardar cambios"):
-    resto = tabla.iloc[end:].append(tabla.iloc[:start])
+    resto = pd.concat([tabla.iloc[:start], tabla.iloc[end:]], ignore_index=True)
     new_full = pd.concat([resto, edited], ignore_index=True)
     new_full["Timestamp"] = pd.to_datetime(new_full["Timestamp"])
     new_full["Fecha"] = pd.to_datetime(new_full["Fecha"]).dt.date
