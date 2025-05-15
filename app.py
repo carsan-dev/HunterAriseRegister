@@ -2,16 +2,16 @@ import streamlit as st
 import pandas as pd
 import os
 import zipfile
-from datetime import datetime, date
+from datetime import date
 
 CONFIG_FILE = "config.csv"
 EXCEL_FILE = "payments.xlsx"
 SCREENSHOT_DIR = "screenshots"
 SUFFIX_MAP = {"qi": 1, "sx": 1_000, "sp": 1_000_000}
-RAW_COLS = ["Timestamp", "Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
+RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 
-def parse_quantity(qstr: str) -> int:
+def parse_quantity(qstr):
     q = qstr.strip().lower()
     for suf, mul in SUFFIX_MAP.items():
         if q.endswith(suf):
@@ -19,149 +19,138 @@ def parse_quantity(qstr: str) -> int:
     return int(float(q))
 
 
-def format_quantity(units: int) -> str:
-    if units % SUFFIX_MAP["sp"] == 0:
-        return f"{units // SUFFIX_MAP['sp']}sp"
-    if units % SUFFIX_MAP["sx"] == 0:
-        return f"{units // SUFFIX_MAP['sx']}sx"
+def format_quantity(units):
+    for suf in ["sp", "sx"]:
+        mul = SUFFIX_MAP[suf]
+        if units % mul == 0:
+            return f"{units // mul}{suf}"
     return f"{units}qi"
 
 
-def compute_overdue_days(expiry: pd.Timestamp) -> int:
-    d = (pd.to_datetime(date.today()) - expiry).days
-    return d if d > 0 else 0
-
-
-def create_empty_payments() -> pd.DataFrame:
+def create_empty_payments():
     df0 = pd.DataFrame(columns=RAW_COLS)
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
         df0.to_excel(w, sheet_name="Pagos", index=False)
     return df0
 
 
-st.set_page_config(layout="wide")
-
-if not os.path.exists(CONFIG_FILE):
-    st.error(f"No se encontró `{CONFIG_FILE}`")
-    st.stop()
-config = pd.read_csv(CONFIG_FILE)
-
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
-if not os.path.exists(EXCEL_FILE):
-    pagos_df = create_empty_payments()
-else:
+@st.cache_data
+def load_payments():
+    if not os.path.exists(CONFIG_FILE):
+        st.error(f"No se encontró `{CONFIG_FILE}`")
+        st.stop()
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    if not os.path.exists(EXCEL_FILE):
+        return create_empty_payments()
     try:
-        pagos_df = pd.read_excel(
-            EXCEL_FILE,
-            sheet_name="Pagos",
-            engine="openpyxl",
-            parse_dates=["Timestamp", "Fecha"],
+        df = pd.read_excel(
+            EXCEL_FILE, sheet_name="Pagos", engine="openpyxl", parse_dates=["Fecha"]
         )
     except (zipfile.BadZipFile, ValueError):
-        st.warning("⚠️ `payments.xlsx` corrupto o inválido. Se crea uno nuevo.")
-        pagos_df = create_empty_payments()
+        return create_empty_payments()
+    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce").dt.date
+    df["expiry_date"] = pd.to_datetime(df["Fecha"]) + pd.to_timedelta(
+        df["Dias"] - 1, unit="d"
+    )
+    df["overdue_days"] = (
+        pd.to_datetime(date.today()) - df["expiry_date"]
+    ).dt.days.clip(lower=0)
+    return df
 
-pagos_df["Timestamp"] = pd.to_datetime(pagos_df["Timestamp"], errors="coerce")
-pagos_df["Fecha"] = pd.to_datetime(pagos_df["Fecha"], errors="coerce")
-pagos_df["expiry_date"] = pagos_df["Fecha"] + pd.to_timedelta(
-    pagos_df["Dias"] - 1, unit="d"
-)
-pagos_df["overdue_days"] = pagos_df["expiry_date"].apply(compute_overdue_days)
+
+st.set_page_config(layout="wide")
+config = pd.read_csv(CONFIG_FILE)
+pagos_df = load_payments()
 
 st.title("💰 Control de Donaciones")
-
 role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
 if role == "Miembro":
     miembro = st.selectbox("Tu nombre", config["Miembro"])
-    cantidad_str = st.text_input("Cantidad pagada (ej. `50qi`, `1sx`)", value="50qi")
-    qi_dia_str = st.text_input("Qi por día (ej. `50qi`)", value="50qi")
-    captura = st.file_uploader(
-        "Sube tu comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"]
-    )
-
+    cantidad_str = st.text_input("Cantidad pagada (ej. 50qi, 1sx)", "50qi")
+    qi_dia_str = st.text_input("Qi por día (ej. 50qi)", "50qi")
+    try:
+        cantidad = parse_quantity(cantidad_str)
+        qi_por_dia = parse_quantity(qi_dia_str)
+        dias_est = cantidad // qi_por_dia if qi_por_dia > 0 else 0
+        st.info(f"{format_quantity(cantidad)} equivale a {dias_est} día(s).")
+    except ValueError:
+        pass
+    captura = st.file_uploader("Sube tu comprobante", type=["png", "jpg", "jpeg"])
     if st.button("Registrar pago"):
-        try:
-            cantidad = parse_quantity(cantidad_str)
-            qi_por_dia = parse_quantity(qi_dia_str)
-            dias = cantidad // qi_por_dia
-            if dias < 1:
-                st.error("La cantidad no cubre ni un día.")
-            else:
-                ts = datetime.now()
-                ruta = ""
-                if captura:
-                    fn = ts.strftime("%Y%m%d%H%M%S") + "_" + miembro + ".png"
-                    ruta = os.path.join(SCREENSHOT_DIR, fn)
-                    with open(ruta, "wb") as f:
-                        f.write(captura.getbuffer())
-                    captura_fn = fn
-                else:
-                    captura_fn = ""
-
-                nuevo = {
-                    "Timestamp": ts,
-                    "Fecha": ts,
-                    "Miembro": miembro,
-                    "Dias": dias,
-                    "Cantidad": cantidad,
-                    "Captura": captura_fn,
-                }
-                pagos_df = pd.concat(
-                    [pagos_df, pd.DataFrame([nuevo])], ignore_index=True
-                )
-                with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
-                    pagos_df[RAW_COLS].to_excel(w, sheet_name="Pagos", index=False)
-                st.success(f"✅ Registrado {dias} día(s) ({format_quantity(cantidad)})")
-        except Exception as e:
-            st.error(f"Error: {e}")
+        cantidad = parse_quantity(cantidad_str)
+        qi_por_dia = parse_quantity(qi_dia_str)
+        dias = cantidad // qi_por_dia
+        if dias < 1:
+            st.error("La cantidad no cubre ni un día.")
+        else:
+            fn = ""
+            if captura:
+                fn = date.today().strftime("%Y%m%d") + "_" + miembro + ".png"
+                ruta = os.path.join(SCREENSHOT_DIR, fn)
+                with open(ruta, "wb") as f:
+                    f.write(captura.getbuffer())
+            nuevo = {
+                "Fecha": date.today(),
+                "Miembro": miembro,
+                "Dias": dias,
+                "Cantidad": cantidad,
+                "Captura": fn,
+            }
+            pagos_df = pd.concat([pagos_df, pd.DataFrame([nuevo])], ignore_index=True)
+            with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
+                pagos_df[RAW_COLS].to_excel(w, sheet_name="Pagos", index=False)
+            load_payments.clear()
+            st.success(f"✅ Registrado {dias} día(s) ({format_quantity(cantidad)})")
     st.stop()
 
 pw = st.sidebar.text_input("Contraseña de admin", type="password").strip()
-if "admin_password" not in st.secrets:
-    st.error("Define `admin_password` en `.streamlit/secrets.toml`")
-    st.stop()
-if pw != st.secrets["admin_password"].strip():
-    st.error("Contraseña incorrecta.")
+if "admin_password" not in st.secrets or pw != st.secrets["admin_password"].strip():
+    st.error("Acceso denegado.")
     st.stop()
 
-st.sidebar.success("👑 Acceso admin concedido")
 st.header("🔑 Panel de Administración")
+if st.button("🔄 Actualizar tabla"):
+    load_payments.clear()
+    pagos_df = load_payments()
 
-last = pagos_df.sort_values("Timestamp").groupby("Miembro").last().reset_index()
-last["expiry_date"] = last["Fecha"] + pd.to_timedelta(last["Dias"] - 1, unit="d")
+last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
+last["expiry_date"] = pd.to_datetime(last["Fecha"]) + pd.to_timedelta(
+    last["Dias"] - 1, unit="d"
+)
 today = pd.to_datetime(date.today())
 status = last[["Miembro", "expiry_date"]].copy()
 status["Días atraso"] = (
     (today - status["expiry_date"]).dt.days.clip(lower=0).astype(int).astype(str)
 )
 missing = set(config["Miembro"]) - set(status["Miembro"])
-for m in missing:
-    status = status.append(
-        {"Miembro": m, "expiry_date": pd.NaT, "Días atraso": "Sin pagos"},
-        ignore_index=True,
+if missing:
+    extras = pd.DataFrame(
+        [{"Miembro": m, "expiry_date": pd.NaT, "Días atraso": "Sin pagos"}]
+        for m in missing
     )
+    status = pd.concat([status, extras], ignore_index=True)
 st.subheader("📋 Estado de miembros")
 st.table(status[["Miembro", "Días atraso"]])
 
 st.subheader("🗂️ Historial de pagos")
-dias_filter = st.slider("Pagos con atraso ≥ días", min_value=0, max_value=365, value=0)
+dias_filter = st.slider("Pagos con atraso ≥ días", 0, 365, 0)
 tabla = pagos_df[pagos_df["overdue_days"] >= dias_filter][RAW_COLS].copy()
-page_size = st.number_input("Filas por página", min_value=5, max_value=50, value=10)
+page_size = st.number_input("Filas por página", 5, 50, 10)
 n_pages = (len(tabla) + page_size - 1) // page_size
-page = st.number_input("Página", min_value=1, max_value=max(1, n_pages), value=1)
+page = st.number_input("Página", 1, max(1, n_pages), 1)
 start, end = (page - 1) * page_size, page * page_size
 view = tabla.iloc[start:end].copy()
-view["Timestamp"] = view["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
-view["Fecha"] = view["Fecha"].dt.strftime("%Y-%m-%d")
+view["Fecha"] = view["Fecha"].astype(str)
 view["Cantidad"] = view["Cantidad"].apply(format_quantity)
-edited = st.experimental_data_editor(view, num_rows="dynamic", use_container_width=True)
+view["Eliminar"] = False
+edited = st.data_editor(view, use_container_width=True)
 if st.button("Guardar cambios"):
-    resto = tabla.drop(view.index, axis=0)
-    edited["Timestamp"] = pd.to_datetime(edited["Timestamp"], errors="coerce")
-    edited["Fecha"] = pd.to_datetime(edited["Fecha"], errors="coerce")
-    edited["Cantidad"] = edited["Cantidad"].apply(parse_quantity)
-    new_full = pd.concat([resto, edited], ignore_index=True)[RAW_COLS]
+    outside = tabla.drop(view.index)
+    keep = edited[~edited["Eliminar"]].copy()[RAW_COLS]
+    keep["Fecha"] = pd.to_datetime(keep["Fecha"], errors="coerce").dt.date
+    keep["Cantidad"] = keep["Cantidad"].apply(parse_quantity)
+    new_full = pd.concat([outside, keep], ignore_index=True)
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
         new_full.to_excel(w, sheet_name="Pagos", index=False)
+    load_payments.clear()
     st.success("📝 Cambios guardados")
