@@ -10,17 +10,18 @@ SCREENSHOTS_DIR = 'screenshots'
 DEFAULT_QI_POR_DIA = 50
 
 SUFFIX_MAP = {
-    'qi': 10**30,
-    'sx': 10**36,
-    'sp': 10**42,
-    'oc': 10**48,
+    'qi': 10**30,  # quintillones
+    'sx': 10**36,  # sextillones
+    'sp': 10**42,  # septillones
+    'oc': 10**48,  # octillones
+    'nd': 10**54,  # nonillones
 }
 
 def parse_quantity(q_str: str) -> int:
     s = q_str.strip().lower().replace(' ', '')
     m = re.fullmatch(r"(\d+)([a-z]{0,2})", s)
     if not m:
-        raise ValueError("Formato inválido. Ejemplo: '50qi', '20sx', '3sp', '4oc' o '100' sin sufijo.")
+        raise ValueError("Formato inválido. Ejemplo: '50qi', '20sx', '3sp', '4oc', '9nd' o '100' sin sufijo.")
     num, suf = m.groups()
     n = int(num)
     if suf:
@@ -34,7 +35,8 @@ if not os.path.exists(CONFIG_FILE):
     st.stop()
 config = pd.read_csv(CONFIG_FILE)
 
-pd.DataFrame(columns=['Fecha','Miembro','Dias','Cantidad','Captura']).to_excel(EXCEL_FILE, sheet_name='Pagos', index=False)
+pd.DataFrame(columns=['Fecha','Miembro','Dias','Cantidad','Captura']) \
+      .to_excel(EXCEL_FILE, sheet_name='Pagos', index=False)
 
 pagos_df = pd.read_excel(EXCEL_FILE, sheet_name='Pagos', parse_dates=['Fecha'])
 if 'Dias' not in pagos_df:
@@ -46,7 +48,7 @@ if role == 'Miembro':
     st.title("📥 Registro de tu Donación")
     miembro = st.selectbox("Selecciona tu nombre", config['Miembro'])
     q_input = st.text_input(
-        "Cantidad pagada (ej: 50qi, 20sx, 3sp, 4oc o sin sufijo)",
+        "Cantidad pagada (ej: 50qi, 20sx, 3sp, 4oc, 9nd o sin sufijo)",
         value=str(DEFAULT_QI_POR_DIA)
     )
     try:
@@ -55,7 +57,13 @@ if role == 'Miembro':
     except ValueError as e:
         st.error(str(e))
         st.stop()
-    qi_por_dia = st.number_input("Qi por día", min_value=1, step=1, value=DEFAULT_QI_POR_DIA)
+    qi_input = st.text_input("Qi por día (ej: 50qi, 20sx, 3sp)", value=f"{DEFAULT_QI_POR_DIA}qi")
+    try:
+        qi_por_dia = parse_quantity(qi_input)
+        st.write(f"Qi por día parseado: **{qi_por_dia:,}**")
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
     dias = cantidad // qi_por_dia
     if cantidad % qi_por_dia != 0:
         st.warning(f"Pago no múltiplo de {qi_por_dia}; se dan {dias} días completos.")
