@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import zipfile
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 
 CONFIG_FILE = "config.csv"
@@ -10,6 +11,7 @@ EXCEL_FILE = "payments.xlsx"
 SCREENSHOT_DIR = "screenshots"
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
+ESP = ZoneInfo("Europe/Madrid")
 
 
 def parse_quantity(qstr):
@@ -48,9 +50,10 @@ def load_payments():
     df["expiry_date"] = pd.to_datetime(df["Fecha"]) + pd.to_timedelta(
         df["Dias"] - 1, unit="d"
     )
-    df["overdue_days"] = (
-        pd.to_datetime(date.today()) - df["expiry_date"]
-    ).dt.days.clip(lower=0)
+    today_date = datetime.now(tz=ESP).date()
+    df["overdue_days"] = (pd.to_datetime(today_date) - df["expiry_date"]).dt.days.clip(
+        lower=0
+    )
     df["Captura"] = df["Captura"].fillna("").astype(str)
     return df
 
@@ -84,13 +87,13 @@ if role == "Miembro":
         if dias < 1:
             st.error("La cantidad no cubre ni un día.")
         else:
-            fn = ""
+            today_date = datetime.now(tz=ESP).date()
+            fn = today_date.strftime("%Y%m%d") + "_" + miembro + ".png"
             if captura:
-                fn = date.today().strftime("%Y%m%d") + "_" + miembro + ".png"
                 with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
                     f.write(captura.getbuffer())
             nuevo = {
-                "Fecha": date.today(),
+                "Fecha": today_date,
                 "Miembro": miembro,
                 "Dias": dias,
                 "Cantidad": q,
@@ -125,7 +128,7 @@ if new_count > st.session_state["last_count"]:
         placeholder = st.sidebar.empty()
         st.session_state["pending_notifications"].append(
             {
-                "time": datetime.now(),
+                "time": datetime.now(tz=ESP),
                 "Miembro": p["Miembro"],
                 "Cantidad": p["Cantidad"],
                 "Dias": p["Dias"],
@@ -136,7 +139,7 @@ if new_count > st.session_state["last_count"]:
 elif new_count < st.session_state["last_count"]:
     st.session_state["last_count"] = new_count
 
-now = datetime.now()
+now = datetime.now(tz=ESP)
 filtered = []
 for n in st.session_state["pending_notifications"]:
     if (now - n["time"]).total_seconds() < 30:
@@ -153,7 +156,8 @@ last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
 last["expiry_date"] = pd.to_datetime(last["Fecha"]) + pd.to_timedelta(
     last["Dias"] - 1, unit="d"
 )
-today = pd.to_datetime(date.today())
+today_date = datetime.now(tz=ESP).date()
+today = pd.to_datetime(today_date)
 status = last[["Miembro", "expiry_date"]].copy()
 status["Días atraso"] = (
     (today - status["expiry_date"]).dt.days.clip(lower=0).astype(int).astype(str)
