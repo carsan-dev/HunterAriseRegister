@@ -46,7 +46,7 @@ if role == 'Miembro':
     st.title("📥 Registro de tu Donación")
     miembro = st.selectbox("Selecciona tu nombre", config['Miembro'])
     q_input = st.text_input(
-        "Cantidad pagada (ej: 50qi, 20sx, 3sp o sin sufijo)",
+        "Cantidad pagada (ej: 50qi, 20sx, 3sp, 4oc o sin sufijo)",
         value=str(DEFAULT_QI_POR_DIA)
     )
     try:
