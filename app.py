@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import zipfile
-import base64
-import streamlit.components.v1 as components
-from datetime import date
+from datetime import date, datetime
 
 CONFIG_FILE = "config.csv"
 EXCEL_FILE = "payments.xlsx"
@@ -13,20 +11,20 @@ SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 
-def parse_quantity(q):
-    q = q.strip().lower()
-    for suf, m in SUFFIX_MAP.items():
+def parse_quantity(qstr):
+    q = qstr.strip().lower()
+    for suf, mul in SUFFIX_MAP.items():
         if q.endswith(suf):
-            return int(float(q[: -len(suf)]) * m)
+            return int(float(q[: -len(suf)]) * mul)
     return int(float(q))
 
 
-def format_quantity(u):
-    for suf in ["sp", "sx"]:
-        m = SUFFIX_MAP[suf]
-        if u % m == 0:
-            return f"{u//m}{suf}"
-    return f"{u}qi"
+def format_quantity(units):
+    for suf in ("sp", "sx"):
+        mul = SUFFIX_MAP[suf]
+        if units % mul == 0:
+            return f"{units//mul}{suf}"
+    return f"{units}qi"
 
 
 def create_empty_payments():
@@ -56,12 +54,6 @@ def load_payments():
     return df
 
 
-def render_clickable_image(path, width=200):
-    with open(path, "rb") as f:
-        data = base64.b64encode(f.read()).decode()
-    return f'<a href="data:image/png;base64,{data}" target="_blank"><img src="data:image/png;base64,{data}" width="{width}"/></a>'
-
-
 st.set_page_config(layout="wide")
 config = pd.read_csv(CONFIG_FILE)
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -77,10 +69,13 @@ if role == "Miembro":
     try:
         q = parse_quantity(cantidad_str)
         qd = parse_quantity(qi_dia_str)
-        st.info(f"{format_quantity(q)} equivale a {q//qd if qd>0 else 0} día(s).")
+        est = q // qd if qd > 0 else 0
+        st.info(f"{format_quantity(q)} equivale a {est} día(s).")
     except ValueError:
         pass
-    cap = st.file_uploader("Sube tu comprobante", type=["png", "jpg", "jpeg"])
+    captura = st.file_uploader(
+        "Sube tu comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"]
+    )
     if st.button("Registrar pago"):
         q = parse_quantity(cantidad_str)
         qd = parse_quantity(qi_dia_str)
@@ -89,10 +84,10 @@ if role == "Miembro":
             st.error("La cantidad no cubre ni un día.")
         else:
             fn = ""
-            if cap:
+            if captura:
                 fn = date.today().strftime("%Y%m%d") + "_" + miembro + ".png"
                 with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
-                    f.write(cap.getbuffer())
+                    f.write(captura.getbuffer())
             nuevo = {
                 "Fecha": date.today(),
                 "Miembro": miembro,
@@ -104,6 +99,7 @@ if role == "Miembro":
             with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
                 pagos_df[RAW_COLS].to_excel(w, sheet_name="Pagos", index=False)
             pagos_df = load_payments()
+            st.session_state["last_count"] = len(pagos_df)
             st.success(f"✅ Registrado {dias} día(s) ({format_quantity(q)})")
     st.stop()
 
@@ -112,10 +108,59 @@ if "admin_password" not in st.secrets or pw != st.secrets["admin_password"].stri
     st.error("Acceso denegado.")
     st.stop()
 
-st.header("🔑 Panel de Administración")
-if st.button("🔄 Actualizar tabla"):
-    pagos_df = load_payments()
+st.sidebar.success("👑 Acceso admin concedido")
+st.sidebar.markdown(
+    "<script>setTimeout(()=>{window.location.reload();}, 5000);</script>",
+    unsafe_allow_html=True,
+)
 
+notif_area = st.sidebar.empty()
+
+if "last_count" not in st.session_state:
+    st.session_state["last_count"] = len(pagos_df)
+    st.session_state["pending_notifications"] = []
+    if len(pagos_df) > 0:
+        last_pago = pagos_df.sort_values("Fecha").iloc[-1]
+        st.session_state["pending_notifications"].append(
+            {
+                "time": datetime.now(),
+                "Miembro": last_pago["Miembro"],
+                "Cantidad": last_pago["Cantidad"],
+                "Dias": last_pago["Dias"],
+            }
+        )
+
+current_count = len(pagos_df)
+if current_count > st.session_state["last_count"]:
+    pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
+    for i in range(st.session_state["last_count"], current_count):
+        p = pagos_sorted.iloc[i]
+        st.session_state["pending_notifications"].append(
+            {
+                "time": datetime.now(),
+                "Miembro": p["Miembro"],
+                "Cantidad": p["Cantidad"],
+                "Dias": p["Dias"],
+            }
+        )
+    st.session_state["last_count"] = current_count
+elif current_count < st.session_state["last_count"]:
+    st.session_state["last_count"] = current_count
+
+now = datetime.now()
+filtered = [
+    n
+    for n in st.session_state["pending_notifications"]
+    if (now - n["time"]).total_seconds() < 30
+]
+st.session_state["pending_notifications"] = filtered
+
+for n in filtered:
+    notif_area.info(
+        f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
+    )
+
+st.header("🔑 Panel de Administración")
 last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
 last["expiry_date"] = pd.to_datetime(last["Fecha"]) + pd.to_timedelta(
     last["Dias"] - 1, unit="d"
@@ -125,11 +170,11 @@ status = last[["Miembro", "expiry_date"]].copy()
 status["Días atraso"] = (
     (today - status["expiry_date"]).dt.days.clip(lower=0).astype(int).astype(str)
 )
-miss = set(config["Miembro"]) - set(status["Miembro"])
-if miss:
+missing = set(config["Miembro"]) - set(status["Miembro"])
+if missing:
     extras = pd.DataFrame(
         [{"Miembro": m, "expiry_date": pd.NaT, "Días atraso": "Sin pagos"}]
-        for m in miss
+        for m in missing
     )
     status = pd.concat([status, extras], ignore_index=True)
 st.subheader("📋 Estado de miembros")
@@ -159,12 +204,12 @@ if st.button("Guardar cambios"):
     st.success("📝 Cambios guardados")
 
 st.subheader("📸 Capturas")
-members = ["Todos"] + sorted(config['Miembro'].unique())
+members = ["Todos"] + sorted(config["Miembro"].unique())
 sel_member = st.selectbox("Mostrar capturas de:", members)
-df_cap = pagos_df if sel_member == "Todos" else pagos_df[pagos_df['Miembro'] == sel_member]
-df_cap = df_cap.sort_values('Fecha')
-
-# Usamos 'gap="small"' para columnas más juntas
+df_cap = (
+    pagos_df if sel_member == "Todos" else pagos_df[pagos_df["Miembro"] == sel_member]
+)
+df_cap = df_cap.sort_values("Fecha")
 cols = st.columns(6, gap="small")
 for idx, r in enumerate(df_cap.itertuples()):
     fn = r.Captura or ""
@@ -173,17 +218,20 @@ for idx, r in enumerate(df_cap.itertuples()):
         if os.path.exists(path):
             col = cols[idx % 6]
             col.image(path, width=150)
-            col.markdown(f"**{r.Miembro}**  \n{r.Fecha:%Y-%m-%d}")
-
+            col.markdown(
+                f"<div style='text-align:center;'>"
+                f"<strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 options = [""] + [
-    f"{r.Miembro} — {r.Fecha:%Y-%m-%d}"
-    for r in df_cap.itertuples() if r.Captura
+    f"{r.Miembro} — {r.Fecha:%Y-%m-%d}" for r in df_cap.itertuples() if r.Captura
 ]
 paths = {
-    f"{r.Miembro} — {r.Fecha:%Y-%m-%d}": os.path.join(SCREENSHOT_DIR, r.Captura)
-    for r in df_cap.itertuples() if r.Captura
+    opt: os.path.join(SCREENSHOT_DIR, fn)
+    for opt, fn in zip(options[1:], df_cap["Captura"])
+    if fn
 }
-
 sel = st.selectbox("Selecciona captura para ampliar:", options)
 if sel:
     st.image(paths[sel], use_container_width=True)
