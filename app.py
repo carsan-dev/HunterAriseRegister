@@ -33,9 +33,12 @@ if not os.path.exists(CONFIG_FILE):
     st.stop()
 config = pd.read_csv(CONFIG_FILE)
 
-pd.DataFrame(columns=['Fecha','Miembro','Dias','Cantidad','Captura']) \
-      .to_excel(EXCEL_FILE, sheet_name='Pagos', index=False)
+if not os.path.exists(EXCEL_FILE):
+    df0 = pd.DataFrame(columns=['Fecha','Miembro','Dias','Cantidad','Captura'])
+    with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
+        df0.to_excel(writer, sheet_name='Pagos', index=False)
 
+pagos_df = pd.read_excel(EXCEL_FILE, sheet_name='Pagos', parse_dates=['Fecha'])
 pagos_df = pd.read_excel(EXCEL_FILE, sheet_name='Pagos', parse_dates=['Fecha'])
 if 'Dias' not in pagos_df:
     pagos_df['Dias'] = 1
