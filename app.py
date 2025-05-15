@@ -64,6 +64,8 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 pagos_df = load_payments()
 
 st.title("💰 Control de Donaciones")
+
+pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_pw")
 role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
 
 if role == "Miembro":
@@ -113,7 +115,6 @@ if role == "Miembro":
             st.success(f"✅ Registrado {dias} día(s) ({format_quantity(q)})")
     st.stop()
 
-pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_pw")
 if (
     "admin_password" not in st.secrets
     or pw.strip() != st.secrets["admin_password"].strip()
