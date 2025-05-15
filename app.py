@@ -65,8 +65,8 @@ pagos_df = load_payments()
 
 st.title("💰 Control de Donaciones")
 
-pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_pw")
 role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
+pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_pw")
 
 if role == "Miembro":
     miembro = st.selectbox("Tu nombre", config["Miembro"])
