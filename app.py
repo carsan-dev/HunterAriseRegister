@@ -9,6 +9,7 @@ EXCEL_FILE = "payments.xlsx"
 SCREENSHOT_DIR = "screenshots"
 SUFFIX_MAP = {"qi": 1, "sx": 1_000, "sp": 1_000_000}
 
+
 def parse_quantity(qstr: str) -> int:
     """Convierte '50qi', '3sx', '2sp' o número simple a unidades base."""
     qstr = qstr.strip().lower()
@@ -41,6 +42,7 @@ def create_empty_payments() -> pd.DataFrame:
         df0.to_excel(writer, sheet_name="Pagos", index=False)
     return df0
 
+
 if not os.path.exists(CONFIG_FILE):
     st.error(f"No existe {CONFIG_FILE}")
     st.stop()
@@ -53,11 +55,16 @@ if not os.path.exists(EXCEL_FILE):
 else:
     try:
         pagos_df = pd.read_excel(
-            EXCEL_FILE, sheet_name="Pagos", parse_dates=["Timestamp", "Fecha"]
+            EXCEL_FILE,
+            sheet_name="Pagos",
+            parse_dates=[],
         )
     except (zipfile.BadZipFile, ValueError):
         st.warning("⚠️ El archivo de pagos está corrupto o inválido. Se crea uno nuevo.")
         pagos_df = create_empty_payments()
+
+pagos_df["Timestamp"] = pd.to_datetime(pagos_df.get("Timestamp", None), errors="coerce")
+pagos_df["Fecha"] = pd.to_datetime(pagos_df.get("Fecha", None), errors="coerce").dt.date
 
 st.set_page_config(layout="wide")
 st.title("💰 Control de Donaciones del Gremio")
@@ -123,9 +130,7 @@ for _, row in config.iterrows():
         overdue = None
     else:
         ultima = dfm.iloc[-1]
-        last_expiry = ultima["Fecha"].date() + pd.Timedelta(
-            days=int(ultima["Dias"]) - 1
-        )
+        last_expiry = ultima["Fecha"] + pd.Timedelta(days=int(ultima["Dias"]) - 1)
         overdue = compute_overdue_days(last_expiry)
     status.append(
         {"Miembro": m, "Días atraso": overdue if overdue is not None else "Sin pagos"}
@@ -141,7 +146,7 @@ dias_filter = st.slider(
 
 mask = []
 for _, pago in pagos_df.iterrows():
-    last_expiry = pago["Fecha"].date() + pd.Timedelta(days=int(pago["Dias"]) - 1)
+    last_expiry = pago["Fecha"] + pd.Timedelta(days=int(pago["Dias"]) - 1)
     overdue = compute_overdue_days(last_expiry)
     mask.append(overdue >= dias_filter)
 
@@ -151,20 +156,22 @@ page_size = st.number_input("Filas por página", min_value=5, max_value=50, valu
 page = st.number_input("Página", min_value=1, value=1)
 start = (page - 1) * page_size
 end = start + page_size
-view = tabla.iloc[start:end]
+view = tabla.iloc[start:end].copy()
 
+view["Timestamp"] = pd.to_datetime(view["Timestamp"], errors="coerce").dt.strftime(
+    "%Y-%m-%d %H:%M:%S"
+)
+view["Fecha"] = pd.to_datetime(view["Fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
 view["Cantidad"] = view["Cantidad"].apply(format_quantity)
-view["Timestamp"] = view["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
-view["Fecha"] = view["Fecha"].dt.strftime("%Y-%m-%d")
 
 edited = st.experimental_data_editor(view, num_rows="dynamic", use_container_width=True)
 
 if st.button("Guardar cambios"):
     resto = pd.concat([tabla.iloc[:start], tabla.iloc[end:]], ignore_index=True)
+    edited["Timestamp"] = pd.to_datetime(edited["Timestamp"], errors="coerce")
+    edited["Fecha"] = pd.to_datetime(edited["Fecha"], errors="coerce").dt.date
+    edited["Cantidad"] = edited["Cantidad"].apply(parse_quantity)
     new_full = pd.concat([resto, edited], ignore_index=True)
-    new_full["Timestamp"] = pd.to_datetime(new_full["Timestamp"])
-    new_full["Fecha"] = pd.to_datetime(new_full["Fecha"]).dt.date
-    new_full["Cantidad"] = new_full["Cantidad"].apply(parse_quantity)
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
         new_full.to_excel(writer, sheet_name="Pagos", index=False)
     st.success("Cambios guardados.")
