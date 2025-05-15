@@ -3,14 +3,11 @@ import pandas as pd
 import os
 from datetime import date
 
-# Archivos y directorios
 CONFIG_FILE = 'config.csv'
 EXCEL_FILE = 'payments.xlsx'
 SCREENSHOTS_DIR = 'screenshots'
-# Valor por defecto de qi por día
 DEFAULT_QI_POR_DIA = 50
 
-# 1) Cargo configuración de miembros
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         st.error(f"Falta el archivo de configuración {CONFIG_FILE}")
@@ -19,32 +16,30 @@ def load_config():
 
 config = load_config()
 
-# 2) Inicializo Excel si no existe
 if not os.path.exists(EXCEL_FILE):
     df0 = pd.DataFrame(columns=['Fecha','Miembro','Dias','Cantidad','Captura'])
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         df0.to_excel(writer, sheet_name='Pagos', index=False)
 
-# 3) Cargo pagos existentes
 pagos_df = pd.read_excel(EXCEL_FILE, sheet_name='Pagos', parse_dates=['Fecha'])
 if 'Dias' not in pagos_df.columns:
     pagos_df['Dias'] = 1
 
-# Sidebar: Selección de rol\ nst.sidebar.title("🔑 Acceso")
 role = st.sidebar.selectbox("¿Quién eres?", ['Miembro', 'Administrador'])
 
 if role == 'Miembro':
     st.title("📥 Registro de tu Donación")
     miembro = st.selectbox("Selecciona tu nombre", config['Miembro'])
-    dias = st.number_input("Días que cubre tu pago", min_value=1, step=1, value=1)
-    qi_por_dia = st.number_input("Qi por día", min_value=0, step=1, value=DEFAULT_QI_POR_DIA)
-    total = dias * qi_por_dia
-    st.write(f"Total a pagar: **{total} qi**")
+    cantidad = st.number_input("Cantidad pagada (qi)", min_value=0, step=1, value=DEFAULT_QI_POR_DIA)
+    qi_por_dia = st.number_input("Qi por día", min_value=1, step=1, value=DEFAULT_QI_POR_DIA)
+    dias = cantidad // qi_por_dia
+    if cantidad % qi_por_dia != 0:
+        st.warning(f"El pago no es múltiplo de {qi_por_dia} qi; se asignarán {dias} días completos.")
+    st.write(f"Días cubiertos: **{dias}**")
     fecha = st.date_input("Fecha del pago", value=date.today())
 
     archivo = st.file_uploader("📸 Subir comprobante (PNG/JPG)", type=['png','jpg','jpeg'])
     if st.button("Enviar Pago"):
-        # Guardar comprobante
         cap = ''
         if archivo:
             os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
@@ -53,12 +48,11 @@ if role == 'Miembro':
             with open(ruta, 'wb') as f:
                 f.write(archivo.getbuffer())
             st.success(f"Comprobante guardado: {cap}")
-        # Guardar registro
         fila = pd.DataFrame([{
             'Fecha': fecha,
             'Miembro': miembro,
             'Dias': dias,
-            'Cantidad': total,
+            'Cantidad': cantidad,
             'Captura': cap
         }])
         pagos_df = pd.concat([pagos_df, fila], ignore_index=True)
