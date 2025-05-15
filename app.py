@@ -34,12 +34,7 @@ def create_empty_payments():
     return df0
 
 
-@st.cache_data
 def load_payments():
-    if not os.path.exists(CONFIG_FILE):
-        st.error(f"No se encontró `{CONFIG_FILE}`")
-        st.stop()
-    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     if not os.path.exists(EXCEL_FILE):
         return create_empty_payments()
     try:
@@ -60,26 +55,27 @@ def load_payments():
 
 st.set_page_config(layout="wide")
 config = pd.read_csv(CONFIG_FILE)
+os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 pagos_df = load_payments()
 
 st.title("💰 Control de Donaciones")
 role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
+
 if role == "Miembro":
     miembro = st.selectbox("Tu nombre", config["Miembro"])
     cantidad_str = st.text_input("Cantidad pagada (ej. 50qi, 1sx)", "50qi")
     qi_dia_str = st.text_input("Qi por día (ej. 50qi)", "50qi")
     try:
-        cantidad = parse_quantity(cantidad_str)
-        qi_por_dia = parse_quantity(qi_dia_str)
-        dias_est = cantidad // qi_por_dia if qi_por_dia > 0 else 0
-        st.info(f"{format_quantity(cantidad)} equivale a {dias_est} día(s).")
+        q = parse_quantity(cantidad_str)
+        qd = parse_quantity(qi_dia_str)
+        st.info(f"{format_quantity(q)} equivale a {q//qd if qd>0 else 0} día(s).")
     except ValueError:
         pass
     captura = st.file_uploader("Sube tu comprobante", type=["png", "jpg", "jpeg"])
     if st.button("Registrar pago"):
-        cantidad = parse_quantity(cantidad_str)
-        qi_por_dia = parse_quantity(qi_dia_str)
-        dias = cantidad // qi_por_dia
+        q = parse_quantity(cantidad_str)
+        qd = parse_quantity(qi_dia_str)
+        dias = q // qd
         if dias < 1:
             st.error("La cantidad no cubre ni un día.")
         else:
@@ -93,14 +89,14 @@ if role == "Miembro":
                 "Fecha": date.today(),
                 "Miembro": miembro,
                 "Dias": dias,
-                "Cantidad": cantidad,
+                "Cantidad": q,
                 "Captura": fn,
             }
             pagos_df = pd.concat([pagos_df, pd.DataFrame([nuevo])], ignore_index=True)
             with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
                 pagos_df[RAW_COLS].to_excel(w, sheet_name="Pagos", index=False)
-            load_payments.clear()
-            st.success(f"✅ Registrado {dias} día(s) ({format_quantity(cantidad)})")
+            pagos_df = load_payments()
+            st.success(f"✅ Registrado {dias} día(s) ({format_quantity(q)})")
     st.stop()
 
 pw = st.sidebar.text_input("Contraseña de admin", type="password").strip()
@@ -110,7 +106,6 @@ if "admin_password" not in st.secrets or pw != st.secrets["admin_password"].stri
 
 st.header("🔑 Panel de Administración")
 if st.button("🔄 Actualizar tabla"):
-    load_payments.clear()
     pagos_df = load_payments()
 
 last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
@@ -145,12 +140,12 @@ view["Cantidad"] = view["Cantidad"].apply(format_quantity)
 view["Eliminar"] = False
 edited = st.data_editor(view, use_container_width=True)
 if st.button("Guardar cambios"):
-    outside = tabla.drop(view.index)
-    keep = edited[~edited["Eliminar"]].copy()[RAW_COLS]
+    resto = tabla.drop(view.index)
+    keep = edited[~edited["Eliminar"]][RAW_COLS].copy()
     keep["Fecha"] = pd.to_datetime(keep["Fecha"], errors="coerce").dt.date
     keep["Cantidad"] = keep["Cantidad"].apply(parse_quantity)
-    new_full = pd.concat([outside, keep], ignore_index=True)
+    new_full = pd.concat([resto, keep], ignore_index=True)
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
         new_full.to_excel(w, sheet_name="Pagos", index=False)
-    load_payments.clear()
+    pagos_df = load_payments()
     st.success("📝 Cambios guardados")
