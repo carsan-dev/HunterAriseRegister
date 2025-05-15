@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import zipfile
 from datetime import date, datetime
+from streamlit_autorefresh import st_autorefresh
 
 CONFIG_FILE = "config.csv"
 EXCEL_FILE = "payments.xlsx"
@@ -108,12 +109,8 @@ if "admin_password" not in st.secrets or pw != st.secrets["admin_password"].stri
     st.error("Acceso denegado.")
     st.stop()
 
+st_autorefresh(interval=5000, key="datarefresh")
 st.sidebar.success("👑 Acceso admin concedido")
-st.sidebar.markdown(
-    "<script>setTimeout(()=>{window.location.reload();}, 5000);</script>",
-    unsafe_allow_html=True,
-)
-
 notif_area = st.sidebar.empty()
 
 if "last_count" not in st.session_state:
@@ -219,9 +216,7 @@ for idx, r in enumerate(df_cap.itertuples()):
             col = cols[idx % 6]
             col.image(path, width=150)
             col.markdown(
-                f"<div>"
-                f"<strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}"
-                f"</div>",
+                f"<div style='text-align:center;'><strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}</div>",
                 unsafe_allow_html=True,
             )
 options = [""] + [
