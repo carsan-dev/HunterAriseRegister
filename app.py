@@ -92,13 +92,26 @@ if role == 'Miembro':
 
 elif role == 'Administrador':
     pwd = st.sidebar.text_input("Contraseña admin", type='password')
-    if pwd == st.secrets.get('admin_password'):
+    stored_pwd = st.secrets["admin_password"]
+    if pwd.strip() == stored_pwd.strip():
         st.title("📊 Panel de Administración")
         st.header("📅 Resumen de Pagos")
         pivot = pagos_df.pivot_table(
             index='Fecha', columns='Miembro', values='Cantidad', aggfunc='sum'
         ).fillna(0).sort_index(ascending=False)
-        st.dataframe(pivot)
+        def format_qty(n):
+            try:
+                n = int(n)
+            except ValueError:
+                return n
+            if n % SUFFIX_MAP['sp'] == 0:
+                return f"{n // SUFFIX_MAP['sp']}sp"
+            if n % SUFFIX_MAP['sx'] == 0:
+                return f"{n // SUFFIX_MAP['sx']}sx"
+            return f"{n}qi"
+        formatted = pivot.applymap(format_qty)
+        st.dataframe(formatted)
+
         st.header("⏳ Pagos pendientes hoy")
         pagos_df['Expiracion'] = pagos_df['Fecha'] + pd.to_timedelta(pagos_df['Dias'], unit='D')
         ult = pagos_df.groupby('Miembro')['Expiracion'].max().reset_index()
