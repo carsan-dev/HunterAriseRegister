@@ -88,8 +88,9 @@ if role == "Miembro":
             st.error("La cantidad no cubre ni un día.")
         else:
             today_date = datetime.now(tz=ESP).date()
-            fn = today_date.strftime("%Y%m%d") + "_" + miembro + ".png"
+            fn = ""
             if captura:
+                fn = today_date.strftime("%Y%m%d") + "_" + miembro + ".png"
                 with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
                     f.write(captura.getbuffer())
             nuevo = {
