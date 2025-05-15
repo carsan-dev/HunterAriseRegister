@@ -122,14 +122,12 @@ if new_count > st.session_state["last_count"]:
     pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
     for i in range(st.session_state["last_count"], new_count):
         p = pagos_sorted.iloc[i]
-        placeholder = st.sidebar.empty()
         st.session_state["pending_notifications"].append(
             {
                 "time": datetime.now(),
                 "Miembro": p["Miembro"],
                 "Cantidad": p["Cantidad"],
                 "Dias": p["Dias"],
-                "placeholder": placeholder,
             }
         )
     st.session_state["last_count"] = new_count
@@ -137,16 +135,17 @@ elif new_count < st.session_state["last_count"]:
     st.session_state["last_count"] = new_count
 
 now = datetime.now()
-filtered = []
-for n in st.session_state["pending_notifications"]:
-    if (now - n["time"]).total_seconds() < 30:
-        n["placeholder"].info(
-            f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
-        )
-        filtered.append(n)
-    else:
-        n["placeholder"].empty()
+filtered = [
+    n
+    for n in st.session_state["pending_notifications"]
+    if (now - n["time"]).total_seconds() < 30
+]
 st.session_state["pending_notifications"] = filtered
+
+for n in filtered:
+    st.sidebar.info(
+        f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
+    )
 
 st.header("🔑 Panel de Administración")
 last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
