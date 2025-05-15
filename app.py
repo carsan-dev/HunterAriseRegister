@@ -2,29 +2,31 @@ import streamlit as st
 import pandas as pd
 import os
 import zipfile
+import base64
+import streamlit.components.v1 as components
 from datetime import date
 
 CONFIG_FILE = "config.csv"
 EXCEL_FILE = "payments.xlsx"
 SCREENSHOT_DIR = "screenshots"
-SUFFIX_MAP = {"qi": 1, "sx": 1_000, "sp": 1_000_000}
+SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 
-def parse_quantity(qstr):
-    q = qstr.strip().lower()
-    for suf, mul in SUFFIX_MAP.items():
+def parse_quantity(q):
+    q = q.strip().lower()
+    for suf, m in SUFFIX_MAP.items():
         if q.endswith(suf):
-            return int(float(q[: -len(suf)]) * mul)
+            return int(float(q[: -len(suf)]) * m)
     return int(float(q))
 
 
-def format_quantity(units):
+def format_quantity(u):
     for suf in ["sp", "sx"]:
-        mul = SUFFIX_MAP[suf]
-        if units % mul == 0:
-            return f"{units // mul}{suf}"
-    return f"{units}qi"
+        m = SUFFIX_MAP[suf]
+        if u % m == 0:
+            return f"{u//m}{suf}"
+    return f"{u}qi"
 
 
 def create_empty_payments():
@@ -50,7 +52,14 @@ def load_payments():
     df["overdue_days"] = (
         pd.to_datetime(date.today()) - df["expiry_date"]
     ).dt.days.clip(lower=0)
+    df["Captura"] = df["Captura"].fillna("").astype(str)
     return df
+
+
+def render_clickable_image(path, width=200):
+    with open(path, "rb") as f:
+        data = base64.b64encode(f.read()).decode()
+    return f'<a href="data:image/png;base64,{data}" target="_blank"><img src="data:image/png;base64,{data}" width="{width}"/></a>'
 
 
 st.set_page_config(layout="wide")
@@ -71,7 +80,7 @@ if role == "Miembro":
         st.info(f"{format_quantity(q)} equivale a {q//qd if qd>0 else 0} día(s).")
     except ValueError:
         pass
-    captura = st.file_uploader("Sube tu comprobante", type=["png", "jpg", "jpeg"])
+    cap = st.file_uploader("Sube tu comprobante", type=["png", "jpg", "jpeg"])
     if st.button("Registrar pago"):
         q = parse_quantity(cantidad_str)
         qd = parse_quantity(qi_dia_str)
@@ -80,11 +89,10 @@ if role == "Miembro":
             st.error("La cantidad no cubre ni un día.")
         else:
             fn = ""
-            if captura:
+            if cap:
                 fn = date.today().strftime("%Y%m%d") + "_" + miembro + ".png"
-                ruta = os.path.join(SCREENSHOT_DIR, fn)
-                with open(ruta, "wb") as f:
-                    f.write(captura.getbuffer())
+                with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
+                    f.write(cap.getbuffer())
             nuevo = {
                 "Fecha": date.today(),
                 "Miembro": miembro,
@@ -117,11 +125,11 @@ status = last[["Miembro", "expiry_date"]].copy()
 status["Días atraso"] = (
     (today - status["expiry_date"]).dt.days.clip(lower=0).astype(int).astype(str)
 )
-missing = set(config["Miembro"]) - set(status["Miembro"])
-if missing:
+miss = set(config["Miembro"]) - set(status["Miembro"])
+if miss:
     extras = pd.DataFrame(
         [{"Miembro": m, "expiry_date": pd.NaT, "Días atraso": "Sin pagos"}]
-        for m in missing
+        for m in miss
     )
     status = pd.concat([status, extras], ignore_index=True)
 st.subheader("📋 Estado de miembros")
@@ -140,12 +148,42 @@ view["Cantidad"] = view["Cantidad"].apply(format_quantity)
 view["Eliminar"] = False
 edited = st.data_editor(view, use_container_width=True)
 if st.button("Guardar cambios"):
-    resto = tabla.drop(view.index)
+    outside = tabla.drop(view.index)
     keep = edited[~edited["Eliminar"]][RAW_COLS].copy()
     keep["Fecha"] = pd.to_datetime(keep["Fecha"], errors="coerce").dt.date
     keep["Cantidad"] = keep["Cantidad"].apply(parse_quantity)
-    new_full = pd.concat([resto, keep], ignore_index=True)
+    new_full = pd.concat([outside, keep], ignore_index=True)
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
         new_full.to_excel(w, sheet_name="Pagos", index=False)
     pagos_df = load_payments()
     st.success("📝 Cambios guardados")
+
+st.subheader("📸 Capturas")
+members = ["Todos"] + sorted(config['Miembro'].unique())
+sel_member = st.selectbox("Mostrar capturas de:", members)
+df_cap = pagos_df if sel_member == "Todos" else pagos_df[pagos_df['Miembro'] == sel_member]
+df_cap = df_cap.sort_values('Fecha')
+
+# Usamos 'gap="small"' para columnas más juntas
+cols = st.columns(6, gap="small")
+for idx, r in enumerate(df_cap.itertuples()):
+    fn = r.Captura or ""
+    if fn:
+        path = os.path.join(SCREENSHOT_DIR, fn)
+        if os.path.exists(path):
+            col = cols[idx % 6]
+            col.image(path, width=150)
+            col.markdown(f"**{r.Miembro}**  \n{r.Fecha:%Y-%m-%d}")
+
+options = [""] + [
+    f"{r.Miembro} — {r.Fecha:%Y-%m-%d}"
+    for r in df_cap.itertuples() if r.Captura
+]
+paths = {
+    f"{r.Miembro} — {r.Fecha:%Y-%m-%d}": os.path.join(SCREENSHOT_DIR, r.Captura)
+    for r in df_cap.itertuples() if r.Captura
+}
+
+sel = st.selectbox("Selecciona captura para ampliar:", options)
+if sel:
+    st.image(paths[sel], use_container_width=True)
