@@ -90,7 +90,12 @@ if role == "Miembro":
             today_date = datetime.now(tz=ESP).date()
             fn = ""
             if captura:
-                fn = today_date.strftime("%Y%m%d") + "_" + miembro + ".png"
+                base = f"{today_date.strftime('%Y%m%d')}_{miembro}"
+                fn = base + ".png"
+                i = 1
+                while os.path.exists(os.path.join(SCREENSHOT_DIR, fn)):
+                    fn = f"{base}_{i}.png"
+                    i += 1
                 with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
                     f.write(captura.getbuffer())
             nuevo = {
