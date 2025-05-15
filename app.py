@@ -10,18 +10,16 @@ SCREENSHOTS_DIR = 'screenshots'
 DEFAULT_QI_POR_DIA = 50
 
 SUFFIX_MAP = {
-    'qi': 10**30,  # quintillones
-    'sx': 10**36,  # sextillones
-    'sp': 10**42,  # septillones
-    'oc': 10**48,  # octillones
-    'nd': 10**54,  # nonillones
+    'qi': 1,        # unidad base
+    'sx': 1_000,    # 1 sx = 1.000 qi
+    'sp': 1_000_000 # 1 sp = 1.000.000 qi
 }
 
 def parse_quantity(q_str: str) -> int:
     s = q_str.strip().lower().replace(' ', '')
     m = re.fullmatch(r"(\d+)([a-z]{0,2})", s)
     if not m:
-        raise ValueError("Formato inválido. Ejemplo: '50qi', '20sx', '3sp', '4oc', '9nd' o '100' sin sufijo.")
+        raise ValueError("Formato inválido. Ejemplo: '50qi', '20sx', '3sp' o '100' sin sufijo.")
     num, suf = m.groups()
     n = int(num)
     if suf:
@@ -48,7 +46,7 @@ if role == 'Miembro':
     st.title("📥 Registro de tu Donación")
     miembro = st.selectbox("Selecciona tu nombre", config['Miembro'])
     q_input = st.text_input(
-        "Cantidad pagada (ej: 50qi, 20sx, 3sp, 4oc, 9nd o sin sufijo)",
+        "Cantidad pagada (ej: 50qi, 20sx, 3sp o sin sufijo)",
         value=str(DEFAULT_QI_POR_DIA)
     )
     try:
