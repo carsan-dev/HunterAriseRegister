@@ -219,7 +219,7 @@ for idx, r in enumerate(df_cap.itertuples()):
             col = cols[idx % 6]
             col.image(path, width=150)
             col.markdown(
-                f"<div style='text-align:center;'>"
+                f"<div>"
                 f"<strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}"
                 f"</div>",
                 unsafe_allow_html=True,
