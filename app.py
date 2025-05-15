@@ -111,51 +111,42 @@ if "admin_password" not in st.secrets or pw != st.secrets["admin_password"].stri
 
 st_autorefresh(interval=5000, key="datarefresh")
 st.sidebar.success("👑 Acceso admin concedido")
-notif_area = st.sidebar.empty()
 
 if "last_count" not in st.session_state:
     st.session_state["last_count"] = len(pagos_df)
+if "pending_notifications" not in st.session_state:
     st.session_state["pending_notifications"] = []
-    if len(pagos_df) > 0:
-        last_pago = pagos_df.sort_values("Fecha").iloc[-1]
-        st.session_state["pending_notifications"].append(
-            {
-                "time": datetime.now(),
-                "Miembro": last_pago["Miembro"],
-                "Cantidad": last_pago["Cantidad"],
-                "Dias": last_pago["Dias"],
-            }
-        )
 
-current_count = len(pagos_df)
-if current_count > st.session_state["last_count"]:
+new_count = len(pagos_df)
+if new_count > st.session_state["last_count"]:
     pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
-    for i in range(st.session_state["last_count"], current_count):
+    for i in range(st.session_state["last_count"], new_count):
         p = pagos_sorted.iloc[i]
+        placeholder = st.sidebar.empty()
         st.session_state["pending_notifications"].append(
             {
                 "time": datetime.now(),
                 "Miembro": p["Miembro"],
                 "Cantidad": p["Cantidad"],
                 "Dias": p["Dias"],
+                "placeholder": placeholder,
             }
         )
-    st.session_state["last_count"] = current_count
-elif current_count < st.session_state["last_count"]:
-    st.session_state["last_count"] = current_count
+    st.session_state["last_count"] = new_count
+elif new_count < st.session_state["last_count"]:
+    st.session_state["last_count"] = new_count
 
 now = datetime.now()
-filtered = [
-    n
-    for n in st.session_state["pending_notifications"]
-    if (now - n["time"]).total_seconds() < 30
-]
+filtered = []
+for n in st.session_state["pending_notifications"]:
+    if (now - n["time"]).total_seconds() < 30:
+        n["placeholder"].info(
+            f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
+        )
+        filtered.append(n)
+    else:
+        n["placeholder"].empty()
 st.session_state["pending_notifications"] = filtered
-
-for n in filtered:
-    notif_area.info(
-        f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
-    )
 
 st.header("🔑 Panel de Administración")
 last = pagos_df.sort_values("Fecha").groupby("Miembro").last().reset_index()
