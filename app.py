@@ -185,7 +185,10 @@ st.subheader("🗂️ Historial de pagos")
 members_hist = ["Todos"] + sorted(config["Miembro"].unique())
 sel_hist_member = st.selectbox("Filtrar por miembro", members_hist)
 min_date = pagos_df["Fecha"].min()
-max_date = pagos_df["Fecha"].max()
+Md = pagos_df["Fecha"].max()
+if not isinstance(Md, date):
+    Md = Md.date()
+max_date = Md
 rango = st.date_input("Rango de fechas", [min_date, max_date])
 if not isinstance(rango, (list, tuple)) or len(rango) != 2:
     st.error("Por favor, añade la fecha de fin al rango")
