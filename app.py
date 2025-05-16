@@ -212,19 +212,21 @@ df_cap = (
     pagos_df if sel_member == "Todos" else pagos_df[pagos_df["Miembro"] == sel_member]
 )
 df_cap = df_cap.sort_values("Fecha")
-cols = st.columns(6, gap="small")
-for idx, r in enumerate(df_cap.itertuples()):
-    fn = r.Captura
-    if fn:
-        path = os.path.join(SCREENSHOT_DIR, fn)
-        if os.path.exists(path):
-            col = cols[idx % 6]
-            col.image(path, width=150)
-            col.markdown(
-                f"<div style='text-align:left;'><strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}</div>",
-                unsafe_allow_html=True,
-            )
-
+for i in range(0, len(df_cap), 6):
+    cols = st.columns(6, gap="small")
+    for j, col in enumerate(cols):
+        idx = i + j
+        if idx < len(df_cap):
+            r = df_cap.iloc[idx]
+            fn = r.Captura
+            if fn:
+                path = os.path.join(SCREENSHOT_DIR, fn)
+                if os.path.exists(path):
+                    col.image(path, width=150)
+                    col.markdown(
+                        f"<div style='text-align:left;'><strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}</div>",
+                        unsafe_allow_html=True,
+                    )
 options = [""]
 paths = {}
 for r in df_cap.itertuples():
@@ -233,7 +235,6 @@ for r in df_cap.itertuples():
         opt = f"{r.Miembro} — {r.Fecha:%Y-%m-%d}"
         options.append(opt)
         paths[opt] = os.path.join(SCREENSHOT_DIR, fn)
-
 sel = st.selectbox("Selecciona captura para ampliar:", options)
 if sel:
     st.image(paths[sel], use_container_width=True)
