@@ -70,6 +70,7 @@ pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_p
 
 if role == "Miembro":
     miembro = st.selectbox("Tu nombre", config["Miembro"])
+    fecha = st.date_input("Fecha de la donación", value=datetime.now(tz=ESP).date())
     cantidad_str = st.text_input("Cantidad pagada (ej. 50qi, 1sx)", "50qi")
     qi_dia_str = st.text_input("Qi por día (ej. 50qi)", "50qi")
     try:
@@ -89,10 +90,9 @@ if role == "Miembro":
         if dias < 1:
             st.error("La cantidad no cubre ni un día.")
         else:
-            today_date = datetime.now(tz=ESP).date()
             fn = ""
             if captura:
-                base = f"{today_date.strftime('%Y%m%d')}_{miembro}"
+                base = f"{fecha.strftime('%Y%m%d')}_{miembro}"
                 fn = base + ".png"
                 i = 1
                 while os.path.exists(os.path.join(SCREENSHOT_DIR, fn)):
@@ -101,7 +101,7 @@ if role == "Miembro":
                 with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
                     f.write(captura.getbuffer())
             nuevo = {
-                "Fecha": today_date,
+                "Fecha": fecha,
                 "Miembro": miembro,
                 "Dias": dias,
                 "Cantidad": q,
@@ -114,6 +114,7 @@ if role == "Miembro":
             st.session_state["last_count"] = len(pagos_df)
             st.success(f"✅ Registrado {dias} día(s) ({format_quantity(q)})")
     st.stop()
+
 
 if (
     "admin_password" not in st.secrets
