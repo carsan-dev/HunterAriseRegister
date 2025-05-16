@@ -165,12 +165,8 @@ for miembro, grp in pagos_df.groupby("Miembro", sort=False):
     exp = compute_expiry(grp)
     records.append({"Miembro": miembro, "expiry_date": exp})
 expiry_df = pd.DataFrame(records)
-missing = set(config["Miembro"]) - set(expiry_df["Miembro"])
-if missing:
-    extras = [{"Miembro": m, "expiry_date": pd.NaT} for m in missing]
-    expiry_df = pd.concat([expiry_df, pd.DataFrame(extras)], ignore_index=True)
 
-status = expiry_df.copy()
+status = expiry_df.copy()()
 today = pd.to_datetime(datetime.now(tz=ESP).date())
 status["Días restantes"] = (
     (status["expiry_date"] - today).dt.days.clip(lower=0).astype(int)
