@@ -166,7 +166,7 @@ for miembro, grp in pagos_df.groupby("Miembro", sort=False):
     records.append({"Miembro": miembro, "expiry_date": exp})
 expiry_df = pd.DataFrame(records)
 
-status = expiry_df.copy()()
+status = expiry_df.copy()
 today = pd.to_datetime(datetime.now(tz=ESP).date())
 status["Días restantes"] = (
     (status["expiry_date"] - today).dt.days.clip(lower=0).astype(int)
