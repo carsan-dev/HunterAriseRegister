@@ -134,14 +134,14 @@ if new_count > st.session_state["last_count"]:
     pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
     for i in range(st.session_state["last_count"], new_count):
         p = pagos_sorted.iloc[i]
-        placeholder = st.sidebar.empty()
+        ph = st.sidebar.empty()
         st.session_state["pending_notifications"].append(
             {
                 "time": datetime.now(tz=ESP),
                 "Miembro": p["Miembro"],
                 "Cantidad": p["Cantidad"],
                 "Dias": p["Dias"],
-                "placeholder": placeholder,
+                "placeholder": ph,
             }
         )
     st.session_state["last_count"] = new_count
@@ -160,37 +160,26 @@ for n in st.session_state["pending_notifications"]:
 st.session_state["pending_notifications"] = filtered
 
 st.header("🔑 Panel de Administración")
-records = []
-for miembro, grp in pagos_df.groupby("Miembro", sort=False):
-    exp = compute_expiry(grp)
-    records.append({"Miembro": miembro, "expiry_date": exp})
-expiry_df = pd.DataFrame(records)
-
-status = expiry_df.copy()
-today = pd.to_datetime(datetime.now(tz=ESP).date())
-status["Días restantes"] = (
-    (status["expiry_date"] - today).dt.days.clip(lower=0).astype(int)
-)
-status["Días atraso"] = (
-    (today - status["expiry_date"]).dt.days.clip(lower=0).astype(int)
-)
-missing = set(config["Miembro"]) - set(status["Miembro"])
-if missing:
-    extras = pd.DataFrame(
-        [
-            {
-                "Miembro": m,
-                "expiry_date": pd.NaT,
-                "Días restantes": "Sin pagos",
-                "Días atraso": "Sin pagos",
-            }
-            for m in missing
-        ]
-    )
-    status = pd.concat([status, extras], ignore_index=True)
+members_list = config["Miembro"].unique()
+status_rows = []
+today_date = datetime.now(tz=ESP).date()
+for m in members_list:
+    grp = pagos_df[pagos_df["Miembro"] == m]
+    if grp.empty:
+        status_rows.append(
+            {"Miembro": m, "Días restantes": "Sin pagos", "Días atraso": "Sin pagos"}
+        )
+    else:
+        exp = compute_expiry(grp)
+        days_left = max((exp.date() - today_date).days, 0)
+        days_over = max((today_date - exp.date()).days, 0)
+        status_rows.append(
+            {"Miembro": m, "Días restantes": days_left, "Días atraso": days_over}
+        )
+status_df = pd.DataFrame(status_rows)
 
 st.subheader("📋 Estado de miembros")
-st.table(status[["Miembro", "Días restantes", "Días atraso"]].astype(str))
+st.table(status_df[["Miembro", "Días restantes", "Días atraso"]].astype(str))
 
 st.subheader("🗂️ Historial de pagos")
 members_hist = ["Todos"] + sorted(config["Miembro"].unique())
