@@ -185,22 +185,10 @@ st.subheader("🗂️ Historial de pagos")
 members_hist = ["Todos"] + sorted(config["Miembro"].unique())
 sel_hist_member = st.selectbox("Filtrar por miembro", members_hist)
 min_val = pagos_df["Fecha"].min()
-if pd.isna(min_val):
-    min_date = date.today()
-elif isinstance(min_val, datetime):
-    min_date = min_val.date()
-else:
-    min_date = min_val
+min_date = min_val.date() if hasattr(min_val, "date") else date.today()
 max_val = pagos_df["Fecha"].max()
-if pd.isna(max_val):
-    max_date = min_date
-elif isinstance(max_val, datetime):
-    max_date = max_val.date()
-else:
-    max_date = max_val
-rango = st.date_input("Rango de fechas", [min_date, max_date])(
-    "Rango de fechas", [min_date, max_date]
-)
+max_date = max_val.date() if hasattr(max_val, "date") else min_date
+rango = st.date_input("Rango de fechas", [min_date, max_date])
 if not isinstance(rango, (list, tuple)) or len(rango) != 2:
     st.error("Por favor, añade la fecha de fin al rango")
     st.stop()
