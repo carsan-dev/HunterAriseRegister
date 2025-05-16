@@ -74,8 +74,8 @@ pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_p
 if role == "Miembro":
     miembro = st.selectbox("Tu nombre", config["Miembro"])
     fecha = st.date_input("Fecha de la donación", value=datetime.now(tz=ESP).date())
-    cantidad_str = st.text_input("Cantidad pagada (ej. 50qi, 1sx)", "50qi")
-    qi_dia_str = st.text_input("Qi por día (ej. 50qi)", "50qi")
+    cantidad_str = st.text_input("Cantidad pagada (ej. 500qi, 1sx)", "1sx")
+    qi_dia_str = st.text_input("Qi por día (ej. 1sx)", "1sx")
     try:
         q = parse_quantity(cantidad_str)
         qd = parse_quantity(qi_dia_str)
