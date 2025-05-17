@@ -120,7 +120,7 @@ def upload_capture_to_storage(fecha, miembro, captura):
     i = 1
     while True:
         existing = supabase_admin.storage.from_(BUCKET).list(path)
-        if not existing.data:
+        if not existing:
             break
         path = f"{base.rsplit('.',1)[0]}_{i}.png"
         i += 1
@@ -132,9 +132,6 @@ def upload_capture_to_storage(fecha, miembro, captura):
 def get_signed_url(path, expires=3600):
     url_data = supabase.storage.from_(BUCKET).create_signed_url(path, expires)
     return url_data.get("signedURL", "")
-
-
-# Vistas
 
 
 def member_view(config):
