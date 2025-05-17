@@ -317,7 +317,7 @@ def main():
         st.error("Acceso denegado")
         return
     st.sidebar.success("👑 Acceso admin concedido")
-    st_autorefresh(interval=5000, key="datarefresh")
+    st_autorefresh(interval=10000, key="datarefresh")
     pagos_df = load_payments()
     show_notifications(pagos_df)
     admin_dashboard(pagos_df, config)
