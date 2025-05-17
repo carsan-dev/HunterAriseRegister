@@ -52,7 +52,7 @@ def load_config():
 
 def load_payments():
     res = (
-        supabase.from_("pagos")
+        supabase_admin.from_("pagos")
         .select("id, fecha, miembro, dias, cantidad, captura")
         .execute()
     )
