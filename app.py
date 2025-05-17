@@ -13,8 +13,10 @@ SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_ANON_KEY = st.secrets["SUPABASE_KEY"]
+SUPABASE_SERVICE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_ANON_KEY)
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 if "admin_pw" not in st.session_state:
     st.session_state["admin_pw"] = ""
@@ -50,7 +52,7 @@ def load_config():
 
 def load_payments():
     res = (
-        supabase.table("pagos")
+        supabase.from_("pagos")
         .select("id, fecha, miembro, dias, cantidad, captura")
         .execute()
     )
@@ -72,7 +74,7 @@ def load_payments():
 
 
 def save_payment(fecha, miembro, dias, cantidad, captura):
-    supabase.table("pagos").insert(
+    supabase_admin.from_("pagos").insert(
         {
             "fecha": fecha.isoformat(),
             "miembro": miembro,
@@ -84,7 +86,7 @@ def save_payment(fecha, miembro, dias, cantidad, captura):
 
 
 def delete_all_and_insert(df_full):
-    supabase.table("pagos").delete().neq("id", 0).execute()
+    supabase_admin.from_("pagos").delete().neq("id", 0).execute()
     records = [
         {
             "fecha": row["Fecha"].isoformat(),
@@ -96,7 +98,7 @@ def delete_all_and_insert(df_full):
         for _, row in df_full.iterrows()
     ]
     if records:
-        supabase.table("pagos").insert(records).execute()
+        supabase_admin.from_("pagos").insert(records).execute()
 
 
 def compute_expiry(group):
@@ -122,7 +124,7 @@ def member_view(config):
         days_str = str(int(est)) if float(est).is_integer() else f"{est:.2f}"
         st.info(f"{format_quantity(q)} equivale a {days_str} día(s)")
     except ValueError:
-        st.error("Error al calcular la cantidad. Revisa el formato.")
+        st.error("Error al calcular la cantidad.")
     captura = st.file_uploader("Comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"])
     if st.button("Registrar pago"):
         try:
@@ -145,7 +147,7 @@ def member_view(config):
                 save_payment(fecha, miembro, dias, q, fn)
                 st.success("✅ Pago registrado")
         except ValueError:
-            st.error("Error al registrar. Verifica los datos.")
+            st.error("Error al registrar.")
     st.stop()
 
 
@@ -155,9 +157,9 @@ def show_notifications(pagos_df):
         st.session_state["pending_notifications"] = []
     new_count = len(pagos_df)
     if new_count > st.session_state["last_count"]:
-        pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
+        ps = pagos_df.sort_values("Fecha").reset_index(drop=True)
         for i in range(st.session_state["last_count"], new_count):
-            p = pagos_sorted.iloc[i]
+            p = ps.iloc[i]
             ph = st.sidebar.empty()
             st.session_state["pending_notifications"].append(
                 {
@@ -212,20 +214,19 @@ def show_historial(config):
     members = ["Todos"] + sorted(config["Miembro"].unique())
     sel = st.selectbox("Filtrar por miembro", members, key="hist_member")
     if pagos_df.empty:
-        min_val = max_val = date.today()
+        lo = max_val = date.today()
     else:
-        min_val = pagos_df["Fecha"].min()
-        max_val = pagos_df["Fecha"].max()
-    dates = st.date_input("Rango de fechas", [min_val, max_val], key="hist_dates")
-    if not (isinstance(dates, (list, tuple)) and len(dates) == 2):
-        st.error("Selecciona fecha inicio y final para el filtro.")
+        lo = pagos_df["Fecha"].min()
+        hi = pagos_df["Fecha"].max()
+    dates = st.date_input("Rango de fechas", [lo, hi], key="hist_dates")
+    if not isinstance(dates, (list, tuple)) or len(dates) != 2:
+        st.error("Seleccione rango")
         return
-    lo, hi = dates
-    df = pagos_df[(pagos_df["Fecha"] >= lo) & (pagos_df["Fecha"] <= hi)]
+    df = pagos_df[(pagos_df["Fecha"] >= dates[0]) & (pagos_df["Fecha"] <= dates[1])]
     if sel != "Todos":
         df = df[df["Miembro"] == sel]
     df_edit = df.copy()
-    df_edit["Cantidad_fmt"] = df_edit["Cantidad"].apply(format_quantity)
+    df_edit["Cantidad_fmt"] = df["Cantidad"].apply(format_quantity)
     df_edit["Eliminar"] = False
     edited = st.data_editor(
         df_edit[
@@ -259,11 +260,13 @@ def show_capturas(config):
     df = df.sort_values("Fecha", ascending=False)
     if "show_all" not in st.session_state:
         st.session_state["show_all"] = False
-    btn = "Mostrar todas" if not st.session_state["show_all"] else "Ocultar"
-    if st.button(btn, key="cap_toggle"):
+    if st.button(
+        "Mostrar todas" if not st.session_state["show_all"] else "Ocultar",
+        key="cap_toggle",
+    ):
         st.session_state["show_all"] = not st.session_state["show_all"]
-    display = df if st.session_state["show_all"] else df.head(5)
-    for _, r in display.iterrows():
+    disp = df if st.session_state["show_all"] else df.head(5)
+    for _, r in disp.iterrows():
         if not r["Captura"]:
             continue
         path = os.path.join(SCREENSHOT_DIR, r["Captura"])
