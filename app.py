@@ -5,9 +5,9 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client, Client
+from io import BytesIO
 
 CONFIG_FILE = "config.csv"
-SCREENSHOT_DIR = "screenshots"
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
@@ -15,8 +15,10 @@ RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_KEY"]
 SUPABASE_SERVICE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_ANON_KEY)
+
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+BUCKET = "screenshots"
 
 if "admin_pw" not in st.session_state:
     st.session_state["admin_pw"] = ""
@@ -73,14 +75,14 @@ def load_payments():
     return df
 
 
-def save_payment(fecha, miembro, dias, cantidad, captura):
+def save_payment(fecha, miembro, dias, cantidad, captura_path):
     supabase_admin.from_("pagos").insert(
         {
             "fecha": fecha.isoformat(),
             "miembro": miembro,
             "dias": dias,
             "cantidad": cantidad,
-            "captura": captura,
+            "captura": captura_path,
         }
     ).execute()
 
@@ -112,6 +114,29 @@ def compute_expiry(group):
     return exp
 
 
+def upload_capture_to_storage(fecha, miembro, captura):
+    base = f"{fecha.strftime('%Y%m%d')}_{miembro}.png"
+    path = base
+    i = 1
+    while True:
+        existing = supabase_admin.storage.from_(BUCKET).list(path)
+        if not existing.data:
+            break
+        path = f"{base.rsplit('.',1)[0]}_{i}.png"
+        i += 1
+    buf = BytesIO(captura.getbuffer())
+    supabase_admin.storage.from_(BUCKET).upload(path, buf, content_type=captura.type)
+    return path
+
+
+def get_signed_url(path, expires=3600):
+    url_data = supabase.storage.from_(BUCKET).create_signed_url(path, expires)
+    return url_data.get("signedURL", "")
+
+
+# Vistas
+
+
 def member_view(config):
     miembro = st.selectbox("Tu nombre", config["Miembro"])
     fecha = st.date_input("Fecha de la donación", datetime.now(tz=ESP).date())
@@ -133,18 +158,10 @@ def member_view(config):
             if dias < 1:
                 st.error("La cantidad no cubre ni un día")
             else:
-                fn = ""
+                captura_path = ""
                 if captura:
-                    base = f"{fecha.strftime('%Y%m%d')}_{miembro}"
-                    fn = base + ".png"
-                    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-                    i = 1
-                    while os.path.exists(os.path.join(SCREENSHOT_DIR, fn)):
-                        fn = f"{base}_{i}.png"
-                        i += 1
-                    with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
-                        f.write(captura.getbuffer())
-                save_payment(fecha, miembro, dias, q, fn)
+                    captura_path = upload_capture_to_storage(fecha, miembro, captura)
+                save_payment(fecha, miembro, dias, q, captura_path)
                 st.success("✅ Pago registrado")
         except ValueError:
             st.error("Error al registrar.")
@@ -267,24 +284,21 @@ def show_capturas(config):
     for _, r in display.iterrows():
         if not r["Captura"]:
             continue
-        path = os.path.join(SCREENSHOT_DIR, r["Captura"])
-        if not os.path.exists(path):
-            continue
+        url = get_signed_url(r["Captura"])
         c1, c2 = st.columns([1, 3])
         with c1:
-            st.image(path, width=100)
+            st.image(url, width=100)
         with c2:
             st.markdown(f"**Miembro:** {r['Miembro']}")
             st.markdown(f"**Fecha:** {r['Fecha']}")
             st.markdown(f"**Cantidad:** {format_quantity(r['Cantidad'])}")
             with st.expander("🔍 Ampliar captura"):
-                st.image(path, use_container_width=True)
+                st.image(url, use_container_width=True)
         st.markdown("---")
 
 
 def main():
     config = load_config()
-    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     st.set_page_config(layout="wide")
     st.title("💰 Control de Donaciones con Supabase")
     role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
