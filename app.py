@@ -37,6 +37,16 @@ def format_quantity(units):
     return f"{units}qi"
 
 
+def load_config():
+    df = pd.read_csv(CONFIG_FILE)
+    first = df.columns[0]
+    if first.lower() != "miembro":
+        df = pd.read_csv(CONFIG_FILE, header=None, names=["Miembro"])
+    else:
+        df = df.rename(columns={first: "Miembro"})
+    return df
+
+
 def load_payments():
     res = (
         supabase.table("pagos")
@@ -60,29 +70,29 @@ def load_payments():
 
 
 def save_payment(fecha, miembro, dias, cantidad, captura):
-    record = {
-        "fecha": fecha.isoformat(),
-        "miembro": miembro,
-        "dias": dias,
-        "cantidad": cantidad,
-        "captura": captura,
-    }
-    supabase.table("pagos").insert(record).execute()
+    supabase.table("pagos").insert(
+        {
+            "fecha": fecha.isoformat(),
+            "miembro": miembro,
+            "dias": dias,
+            "cantidad": cantidad,
+            "captura": captura,
+        }
+    ).execute()
 
 
 def delete_all_and_insert(df_full):
     supabase.table("pagos").delete().neq("id", 0).execute()
-    records = []
-    for _, row in df_full.iterrows():
-        records.append(
-            {
-                "fecha": row["Fecha"].isoformat(),
-                "miembro": row["Miembro"],
-                "dias": row["Dias"],
-                "cantidad": row["Cantidad"],
-                "captura": row["Captura"],
-            }
-        )
+    records = [
+        {
+            "fecha": row["Fecha"].isoformat(),
+            "miembro": row["Miembro"],
+            "dias": row["Dias"],
+            "cantidad": row["Cantidad"],
+            "captura": row["Captura"],
+        }
+        for _, row in df_full.iterrows()
+    ]
     if records:
         supabase.table("pagos").insert(records).execute()
 
@@ -132,7 +142,7 @@ def member_view(config):
                         f.write(captura.getbuffer())
                 save_payment(fecha, miembro, dias, q, fn)
                 st.success("✅ Pago registrado")
-        except:
+        except ValueError:
             st.error("Error al registrar. Verifica los datos.")
     st.stop()
 
@@ -270,10 +280,10 @@ def show_capturas(config):
 
 
 def main():
-    config = pd.read_csv(CONFIG_FILE)
+    config = load_config()
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     st.set_page_config(layout="wide")
-    st.title("💰 Control de Donaciones de HunterArise")
+    st.title("💰 Control de Donaciones con Supabase")
     role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
     if role == "Miembro":
         member_view(config)
