@@ -38,19 +38,26 @@ def format_quantity(units):
 
 
 def load_payments():
-    res = supabase.table("pagos").select("id, fecha, miembro, dias, cantidad, captura").execute()
+    res = supabase.table("pagos") \
+                   .select("id, fecha, miembro, dias, cantidad, captura") \
+                   .execute()
     data = res.data or []
     df = pd.DataFrame(data)
-    if not df.empty:
-        df = df.rename(columns={
-            'fecha': 'Fecha',
-            'miembro': 'Miembro',
-            'dias': 'Dias',
-            'cantidad': 'Cantidad',
-            'captura': 'Captura'
-        })
-        df['Fecha'] = pd.to_datetime(df['Fecha']).dt.date
+
+    if df.empty:
+        df = pd.DataFrame(columns=['id','fecha','miembro','dias','cantidad','captura'])
+
+    df = df.rename(columns={
+        'fecha': 'Fecha',
+        'miembro': 'Miembro',
+        'dias': 'Dias',
+        'cantidad': 'Cantidad',
+        'captura': 'Captura'
+    })
+    df['Fecha'] = pd.to_datetime(df['Fecha']).dt.date
+
     return df
+
 
 
 def save_payment(fecha, miembro, dias, cantidad, captura):
