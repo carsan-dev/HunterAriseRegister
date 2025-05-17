@@ -6,22 +6,25 @@ from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client, Client
 
+# Configuración
 CONFIG_FILE = "config.csv"
 SCREENSHOT_DIR = "screenshots"
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
+# Cliente Supabase
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Funciones auxiliares
 
 def parse_quantity(qstr):
     q = qstr.strip().lower()
     for suf, mul in SUFFIX_MAP.items():
         if q.endswith(suf):
-            return float(q[: -len(suf)]) * mul
+            return float(q[:-len(suf)]) * mul
     return float(q)
 
 
@@ -38,26 +41,13 @@ def format_quantity(units):
 
 
 def load_payments():
-    res = supabase.table("pagos") \
-                   .select("id, fecha, miembro, dias, cantidad, captura") \
-                   .execute()
+    res = supabase.table("pagos").select("id, fecha, miembro, dias, cantidad, captura").execute()
     data = res.data or []
     df = pd.DataFrame(data)
-
-    if df.empty:
-        df = pd.DataFrame(columns=['id','fecha','miembro','dias','cantidad','captura'])
-
-    df = df.rename(columns={
-        'fecha': 'Fecha',
-        'miembro': 'Miembro',
-        'dias': 'Dias',
-        'cantidad': 'Cantidad',
-        'captura': 'Captura'
-    })
-    df['Fecha'] = pd.to_datetime(df['Fecha']).dt.date
-
+    if not df.empty:
+        df = df.rename(columns={'fecha': 'Fecha', 'miembro': 'Miembro', 'dias': 'Dias', 'cantidad': 'Cantidad', 'captura': 'Captura'})
+        df['Fecha'] = pd.to_datetime(df['Fecha']).dt.date
     return df
-
 
 
 def save_payment(fecha, miembro, dias, cantidad, captura):
@@ -72,7 +62,9 @@ def save_payment(fecha, miembro, dias, cantidad, captura):
 
 
 def delete_all_and_insert(df_full):
+    # Elimina todos los registros
     supabase.table('pagos').delete().neq('id', 0).execute()
+    # Inserta de nuevo
     records = []
     for _, row in df_full.iterrows():
         records.append({
@@ -96,8 +88,10 @@ def compute_expiry(group):
             exp += pd.to_timedelta(d, unit='d')
     return exp
 
+# Vistas
 
 def member_view(config):
+    pagos_df = load_payments()
     miembro = st.selectbox('Tu nombre', config['Miembro'])
     fecha = st.date_input('Fecha de la donación', datetime.now(tz=ESP).date())
     cantidad_str = st.text_input('Cantidad pagada (ej. 1sx)', '1sx')
@@ -106,7 +100,7 @@ def member_view(config):
         q = parse_quantity(cantidad_str)
         qd = parse_quantity(qi_dia_str)
         est = q / qd if qd > 0 else 0
-        days_str = f"{est:.2f}" if not float(est).is_integer() else str(int(est))
+        days_str = f"{int(est)}" if float(est).is_integer() else f"{est:.2f}"
         st.info(f"{format_quantity(q)} equivale a {days_str} día(s)")
     except Exception:
         st.error('Error al calcular la cantidad. Revisa el formato.')
@@ -136,6 +130,53 @@ def member_view(config):
     st.stop()
 
 
+def show_notifications(pagos_df):
+    if 'last_count' not in st.session_state:
+        st.session_state['last_count'] = len(pagos_df)
+        st.session_state['pending_notifications'] = []
+    new_count = len(pagos_df)
+    if new_count > st.session_state['last_count']:
+        pagos_sorted = pagos_df.sort_values('Fecha').reset_index(drop=True)
+        for i in range(st.session_state['last_count'], new_count):
+            p = pagos_sorted.iloc[i]
+            ph = st.sidebar.empty()
+            st.session_state['pending_notifications'].append({
+                'time': datetime.now(tz=ESP),
+                'Miembro': p['Miembro'],
+                'Cantidad': p['Cantidad'],
+                'Dias': p['Dias'],
+                'placeholder': ph,
+            })
+        st.session_state['last_count'] = new_count
+    now = datetime.now(tz=ESP)
+    kept = []
+    for n in st.session_state['pending_notifications']:
+        if (now - n['time']).total_seconds() < 30:
+            n['placeholder'].info(f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)")
+            kept.append(n)
+        else:
+            n['placeholder'].empty()
+    st.session_state['pending_notifications'] = kept
+
+
+def admin_dashboard(pagos_df, config):
+    st.header('🔑 Panel de Administración')
+    rows = []
+    today = datetime.now(tz=ESP).date()
+    for m in config['Miembro'].unique():
+        grp = pagos_df[pagos_df['Miembro'] == m]
+        if grp.empty:
+            rows.append({'Miembro': m, 'Días restantes': 'Sin pagos', 'Días atraso': 'Sin pagos'})
+        else:
+            exp = compute_expiry(grp)
+            left = max((exp.date() - today).days, 0)
+            over = max((today - exp.date()).days, 0)
+            rows.append({'Miembro': m, 'Días restantes': left, 'Días atraso': over})
+    df = pd.DataFrame(rows)
+    st.subheader('📋 Estado de miembros')
+    st.table(df.astype(str))
+
+
 def show_historial(config):
     pagos_df = load_payments()
     st.subheader('🗂️ Historial de pagos')
@@ -158,10 +199,10 @@ def show_historial(config):
     df_edit['Cantidad_fmt'] = df_edit['Cantidad'].apply(format_quantity)
     df_edit['Eliminar'] = False
     edited = st.data_editor(
-        df_edit[['id','Fecha','Miembro','Dias','Cantidad_fmt','Captura','Eliminar']],
+        df_edit[["id","Fecha","Miembro","Dias","Cantidad_fmt","Captura","Eliminar"]],
         column_config={
             'id': {'hidden': True},
-            'Captura': {'disabled': True},
+            'Captura': {'title': 'Captura (ruta)', 'type': 'text', 'disabled': True},
             'Cantidad_fmt': {'title': 'Cantidad'},
             'Eliminar': {'type': 'boolean'},
         }, use_container_width=True, key='hist_editor'
@@ -181,7 +222,7 @@ def show_capturas(config):
     st.subheader('📸 Capturas de pagos')
     members = ['Todos'] + sorted(config['Miembro'].unique())
     sel = st.selectbox('Mostrar capturas de:', members, key='cap_member')
-    df = pagos_df if sel=='Todos' else pagos_df[pagos_df['Miembro']==sel]
+    df = pagos_df if sel == 'Todos' else pagos_df[pagos_df['Miembro'] == sel]
     df = df.sort_values('Fecha', ascending=False)
     if 'show_all' not in st.session_state:
         st.session_state['show_all'] = False
@@ -190,17 +231,20 @@ def show_capturas(config):
         st.session_state['show_all'] = not st.session_state['show_all']
     display = df if st.session_state['show_all'] else df.head(5)
     for _, r in display.iterrows():
-        if not r['Captura']: continue
+        if not r['Captura']:
+            continue
         path = os.path.join(SCREENSHOT_DIR, r['Captura'])
-        if not os.path.exists(path): continue
+        if not os.path.exists(path):
+            continue
         c1, c2 = st.columns([1,3])
-        with c1: st.image(path, width=100)
+        with c1:
+            st.image(path, width=100)
         with c2:
             st.markdown(f"**Miembro:** {r['Miembro']}")
             st.markdown(f"**Fecha:** {r['Fecha']}")
             st.markdown(f"**Cantidad:** {format_quantity(r['Cantidad'])}")
             with st.expander('🔍 Ampliar captura'):
-                st.image(path, use_container_width=True)
+                st.image(path, use_column_width=True)
         st.markdown('---')
 
 
@@ -209,18 +253,36 @@ def main():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     st.set_page_config(layout='wide')
     st.title('💰 Control de Donaciones con Supabase')
+
     role = st.sidebar.selectbox('¿Quién eres?', ['Miembro','Administrador'])
-    if role=='Miembro':
+    # Persistir autenticación admin en sesión
+    if 'admin_auth' not in st.session_state:
+        st.session_state['admin_auth'] = False
+    if role == 'Miembro':
         member_view(config)
         return
-    pw = st.sidebar.text_input('Contraseña admin', type='password')
-    if pw!=st.secrets.get('admin_password',''):
-        st.error('Acceso denegado')
+
+    # Autenticación admin
+    if not st.session_state['admin_auth']:
+        pw = st.sidebar.text_input('Contraseña admin', type='password')
+        if pw:
+            if pw == st.secrets.get('admin_password', ''):
+                st.session_state['admin_auth'] = True
+                st.sidebar.success('👑 Acceso admin concedido')
+            else:
+                st.sidebar.error('Acceso denegado')
         return
+
     st.sidebar.success('👑 Acceso admin concedido')
-    st_autorefresh(interval=5000, key='datarefresh')
+    # Auto-refresh cada 30s
+    st_autorefresh(interval=30000, key='datarefresh')
+
+    # Cargar datos y mostrar vistas admin
+    pagos_df = load_payments()
+    show_notifications(pagos_df)
+    admin_dashboard(pagos_df, config)
     show_historial(config)
     show_capturas(config)
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()
