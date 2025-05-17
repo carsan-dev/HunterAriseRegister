@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 import os
-import zipfile
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 
 CONFIG_FILE = "config.csv"
-EXCEL_FILE = "payments.xlsx"
+DB_FILE = "payments.db"
 SCREENSHOT_DIR = "screenshots"
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
@@ -18,37 +18,52 @@ def parse_quantity(qstr):
     q = qstr.strip().lower()
     for suf, mul in SUFFIX_MAP.items():
         if q.endswith(suf):
-            return int(float(q[: -len(suf)]) * mul)
-    return int(float(q))
+            return float(q[: -len(suf)]) * mul
+    return float(q)
 
 
 def format_quantity(units):
-    for suf in ("sp", "sx"):
+    for suf in ("sp", "sx", "qi"):
         mul = SUFFIX_MAP[suf]
-        if units % mul == 0:
-            return f"{units//mul}{suf}"
+        val = units / mul
+        if val >= 1:
+            if float(val).is_integer():
+                return f"{int(val)}{suf}"
+            else:
+                s = f"{val:.3f}".rstrip('0').rstrip('.')
+                return f"{s}{suf}"
     return f"{units}qi"
 
 
-def create_empty_payments():
-    df0 = pd.DataFrame(columns=RAW_COLS)
-    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
-        df0.to_excel(w, sheet_name="Pagos", index=False)
-    return df0
-
-
-def load_payments():
-    if not os.path.exists(EXCEL_FILE):
-        return create_empty_payments()
-    try:
-        df = pd.read_excel(
-            EXCEL_FILE, sheet_name="Pagos", engine="openpyxl", parse_dates=["Fecha"]
+def init_db():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pagos (
+            Fecha TEXT,
+            Miembro TEXT,
+            Dias REAL,
+            Cantidad REAL,
+            Captura TEXT
         )
-    except (zipfile.BadZipFile, ValueError):
-        return create_empty_payments()
-    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce").dt.date
-    df["Captura"] = df["Captura"].fillna("").astype(str)
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def load_payments(conn):
+    df = pd.read_sql("SELECT rowid as id, * FROM pagos", conn, parse_dates=["Fecha"])
+    df["Fecha"] = pd.to_datetime(df["Fecha"]).dt.date
     return df
+
+
+def save_payment(conn, fecha, miembro, dias, cantidad, captura):
+    conn.execute(
+        "INSERT INTO pagos (Fecha,Miembro,Dias,Cantidad,Captura) VALUES (?,?,?,?,?)",
+        (fecha.isoformat(), miembro, dias, cantidad, captura),
+    )
+    conn.commit()
 
 
 def compute_expiry(group):
@@ -58,219 +73,209 @@ def compute_expiry(group):
         if exp is None or f > exp:
             exp = f + pd.to_timedelta(d - 1, unit="d")
         else:
-            exp = exp + pd.to_timedelta(d, unit="d")
+            exp += pd.to_timedelta(d, unit="d")
     return exp
 
 
-st.set_page_config(layout="wide")
-config = pd.read_csv(CONFIG_FILE)
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-pagos_df = load_payments()
-
-st.title("💰 Control de Donaciones")
-role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
-pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin_pw")
-
-if role == "Miembro":
+def member_view(conn, config):
     miembro = st.selectbox("Tu nombre", config["Miembro"])
-    fecha = st.date_input("Fecha de la donación", value=datetime.now(tz=ESP).date())
-    cantidad_str = st.text_input("Cantidad pagada (ej. 500qi, 1sx)", "1sx")
+    fecha = st.date_input("Fecha de la donación", datetime.now(tz=ESP).date())
+    cantidad_str = st.text_input("Cantidad pagada (ej. 1sx)", "1sx")
     qi_dia_str = st.text_input("Sx por día (ej. 1sx)", "1sx")
     try:
         q = parse_quantity(cantidad_str)
         qd = parse_quantity(qi_dia_str)
-        est = q // qd if qd > 0 else 0
-        st.info(f"{format_quantity(q)} equivale a {est} día(s)")
-    except ValueError:
-        pass
-    captura = st.file_uploader(
-        "Sube tu comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"]
-    )
-    if st.button("Registrar pago"):
-        q = parse_quantity(cantidad_str)
-        dias = q // parse_quantity(qi_dia_str)
-        if dias < 1:
-            st.error("La cantidad no cubre ni un día")
+        est = q / qd if qd > 0 else 0
+        if float(est).is_integer():
+            days_str = f"{int(est)} día(s)"
         else:
-            fn = ""
-            if captura:
-                base = f"{fecha.strftime('%Y%m%d')}_{miembro}"
-                fn = base + ".png"
-                i = 1
-                while os.path.exists(os.path.join(SCREENSHOT_DIR, fn)):
-                    fn = f"{base}_{i}.png"
-                    i += 1
-                with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
-                    f.write(captura.getbuffer())
-            nuevo = {
-                "Fecha": fecha,
-                "Miembro": miembro,
-                "Dias": dias,
-                "Cantidad": q,
-                "Captura": fn,
-            }
-            pagos_df = pd.concat([pagos_df, pd.DataFrame([nuevo])], ignore_index=True)
-            with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
-                pagos_df.to_excel(w, sheet_name="Pagos", index=False)
-            st.success("✅ Pago registrado")
+            days_str = f"{est:.2f} día(s)"
+        st.info(f"{format_quantity(q)} equivale a {days_str}")
+    except Exception:
+        st.error("Error al calcular la cantidad. Revisa el formato de entrada.")
+    captura = st.file_uploader("Comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"])
+    if st.button("Registrar pago"):
+        try:
+            q = parse_quantity(cantidad_str)
+            qd = parse_quantity(qi_dia_str)
+            dias = q / qd if qd > 0 else 0
+            if dias < 1:
+                st.error("La cantidad no cubre ni un día")
+            else:
+                fn = ""
+                if captura:
+                    base = f"{fecha.strftime('%Y%m%d')}_{miembro}"
+                    fn = base + ".png"
+                    i = 1
+                    while os.path.exists(os.path.join(SCREENSHOT_DIR, fn)):
+                        fn = f"{base}_{i}.png"
+                        i += 1
+                    with open(os.path.join(SCREENSHOT_DIR, fn), "wb") as f:
+                        f.write(captura.getbuffer())
+                save_payment(conn, fecha, miembro, dias, q, fn)
+                st.success("✅ Pago registrado")
+        except Exception:
+            st.error("Error al registrar el pago. Revisa datos.")
     st.stop()
 
-if (
-    "admin_password" not in st.secrets
-    or pw.strip() != st.secrets["admin_password"].strip()
-):
-    st.error("Acceso denegado")
-    st.stop()
 
-st_autorefresh(interval=5000, key="datarefresh")
-st.sidebar.success("👑 Acceso admin concedido")
+def show_notifications(pagos_df):
+    if "last_count" not in st.session_state:
+        st.session_state["last_count"] = len(pagos_df)
+        st.session_state["pending_notifications"] = []
+    new_count = len(pagos_df)
+    if new_count > st.session_state["last_count"]:
+        pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
+        for i in range(st.session_state["last_count"], new_count):
+            p = pagos_sorted.iloc[i]
+            ph = st.sidebar.empty()
+            st.session_state["pending_notifications"].append(
+                {
+                    "time": datetime.now(tz=ESP),
+                    "Miembro": p["Miembro"],
+                    "Cantidad": p["Cantidad"],
+                    "Dias": p["Dias"],
+                    "placeholder": ph,
+                }
+            )
+        st.session_state["last_count"] = new_count
+    now = datetime.now(tz=ESP)
+    kept = []
+    for n in st.session_state["pending_notifications"]:
+        if (now - n["time"]).total_seconds() < 30:
+            n["placeholder"].info(
+                f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
+            )
+            kept.append(n)
+        else:
+            n["placeholder"].empty()
+    st.session_state["pending_notifications"] = kept
 
-if "last_count" not in st.session_state:
-    st.session_state["last_count"] = len(pagos_df)
-if "pending_notifications" not in st.session_state:
-    st.session_state["pending_notifications"] = []
-new_count = len(pagos_df)
-if new_count > st.session_state["last_count"]:
-    pagos_sorted = pagos_df.sort_values("Fecha").reset_index(drop=True)
-    for i in range(st.session_state["last_count"], new_count):
-        p = pagos_sorted.iloc[i]
-        ph = st.sidebar.empty()
-        st.session_state["pending_notifications"].append(
-            {
-                "time": datetime.now(tz=ESP),
-                "Miembro": p["Miembro"],
-                "Cantidad": p["Cantidad"],
-                "Dias": p["Dias"],
-                "placeholder": ph,
-            }
-        )
-    st.session_state["last_count"] = new_count
-elif new_count < st.session_state["last_count"]:
-    st.session_state["last_count"] = new_count
-now = datetime.now(tz=ESP)
-filtered = []
-for n in st.session_state["pending_notifications"]:
-    if (now - n["time"]).total_seconds() < 30:
-        n["placeholder"].info(
-            f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
-        )
-        filtered.append(n)
+
+def admin_dashboard(pagos_df, config):
+    st.header("🔑 Panel de Administración")
+    rows = []
+    today = datetime.now(tz=ESP).date()
+    for m in config["Miembro"].unique():
+        grp = pagos_df[pagos_df["Miembro"] == m]
+        if grp.empty:
+            rows.append({"Miembro": m, "Días restantes": "Sin pagos", "Días atraso": "Sin pagos"})
+        else:
+            exp = compute_expiry(grp)
+            left = max((exp.date() - today).days, 0)
+            over = max((today - exp.date()).days, 0)
+            rows.append({"Miembro": m, "Días restantes": left, "Días atraso": over})
+    df = pd.DataFrame(rows)
+    st.subheader("📋 Estado de miembros")
+    st.table(df[["Miembro", "Días restantes", "Días atraso"]].astype(str))
+
+
+def show_historial(conn, config):
+    pagos_df = load_payments(conn)
+    st.subheader("🗂️ Historial de pagos")
+    members = ["Todos"] + sorted(config["Miembro"].unique())
+    sel = st.selectbox("Filtrar por miembro", members, key="hist_member")
+    if pagos_df.empty:
+        min_val = max_val = date.today()
     else:
-        n["placeholder"].empty()
-st.session_state["pending_notifications"] = filtered
-
-st.header("🔑 Panel de Administración")
-members_list = config["Miembro"].unique()
-status_rows = []
-today_date = datetime.now(tz=ESP).date()
-for m in members_list:
-    grp = pagos_df[pagos_df["Miembro"] == m]
-    if grp.empty:
-        status_rows.append(
-            {"Miembro": m, "Días restantes": "Sin pagos", "Días atraso": "Sin pagos"}
-        )
-    else:
-        exp = compute_expiry(grp)
-        days_left = max((exp.date() - today_date).days, 0)
-        days_over = max((today_date - exp.date()).days, 0)
-        status_rows.append(
-            {"Miembro": m, "Días restantes": days_left, "Días atraso": days_over}
-        )
-status_df = pd.DataFrame(status_rows)
-
-st.subheader("📋 Estado de miembros")
-st.table(status_df[["Miembro", "Días restantes", "Días atraso"]].astype(str))
-
-st.subheader("🗂️ Historial de pagos")
-members_hist = ["Todos"] + sorted(config["Miembro"].unique())
-sel_hist_member = st.selectbox("Filtrar por miembro", members_hist)
-min_val = pagos_df["Fecha"].min()
-min_date = min_val.date() if hasattr(min_val, "date") else date.today()
-max_val = pagos_df["Fecha"].max()
-max_date = max_val.date() if hasattr(max_val, "date") else min_date
-rango = st.date_input("Rango de fechas", [min_date, max_date])
-if not isinstance(rango, (list, tuple)) or len(rango) != 2:
-    st.error("Por favor, añade la fecha de fin al rango")
-    st.stop()
-date_inf, date_sup = rango
-tabla = pagos_df.copy()
-if sel_hist_member != "Todos":
-    tabla = tabla[tabla["Miembro"] == sel_hist_member]
-tabla = tabla[(tabla["Fecha"] >= date_inf) & (tabla["Fecha"] <= date_sup)]
-tabla["expiry_date"] = pd.to_datetime(tabla["Fecha"]) + pd.to_timedelta(
-    tabla["Dias"] - 1, unit="d"
-)
-
-today_date = datetime.now(tz=ESP).date()
-tabla["Días atraso"] = (
-    (pd.to_datetime(today_date) - tabla["expiry_date"])
-    .dt.days.clip(lower=0)
-    .astype(int)
-)
-
-dias_filter = st.slider("Pagos con atraso ≥ días", 0, 365, 0)
-tabla = tabla[tabla["Días atraso"] >= dias_filter][RAW_COLS].copy()
-
-page_size = st.number_input("Filas por página", 5, 50, 10)
-n_pages = (len(tabla) + page_size - 1) // page_size
-page = st.number_input("Página", 1, max(1, n_pages), 1)
-start, end = (page - 1) * page_size, page * page_size
-view = tabla.iloc[start:end].copy()
-view["Fecha"] = view["Fecha"].astype(str)
-view["Cantidad"] = view["Cantidad"].apply(format_quantity)
-view["Eliminar"] = False
-edited = st.data_editor(view, use_container_width=True)
-if st.button("Guardar cambios"):
-    outside = tabla.drop(view.index)
-    keep = edited[~edited["Eliminar"]][RAW_COLS].copy()
-    keep["Fecha"] = pd.to_datetime(keep["Fecha"], errors="coerce").dt.date
-    keep["Cantidad"] = keep["Cantidad"].apply(parse_quantity)
-    new_full = pd.concat([outside, keep], ignore_index=True)
-    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as w:
-        new_full.to_excel(w, sheet_name="Pagos", index=False)
-    pagos_df = load_payments()
-    st.success("📝 Cambios guardados")
-
-st.subheader("📸 Capturas")
-members = ["Todos"] + sorted(config["Miembro"].unique())
-sel_member = st.selectbox("Mostrar capturas de:", members)
-df_cap = (
-    pagos_df if sel_member == "Todos" else pagos_df[pagos_df["Miembro"] == sel_member]
-)
-df_cap = df_cap.sort_values("Fecha")
-if "show_all_caps" not in st.session_state:
-    st.session_state.show_all_caps = False
-btn_label = (
-    "Ocultar capturas"
-    if st.session_state.show_all_caps
-    else "Mostrar todas las capturas"
-)
-if st.button(btn_label):
-    st.session_state.show_all_caps = not st.session_state.show_all_caps
-caps_to_show = df_cap if st.session_state.show_all_caps else df_cap.head(12)
-for i in range(0, len(caps_to_show), 6):
-    cols = st.columns(6, gap="small")
-    for j, col in enumerate(cols):
-        idx = i + j
-        if idx < len(caps_to_show):
-            r = caps_to_show.iloc[idx]
-            fn = r.Captura
-            if fn:
-                path = os.path.join(SCREENSHOT_DIR, fn)
+        min_raw = pagos_df["Fecha"].min()
+        max_raw = pagos_df["Fecha"].max()
+        min_val = min_raw if isinstance(min_raw, date) else date.today()
+        max_val = max_raw if isinstance(max_raw, date) else date.today()
+    dates = st.date_input("Rango de fechas", [min_val, max_val], key="hist_dates")
+    if not (isinstance(dates, (list, tuple)) and len(dates) == 2):
+        st.error("Por favor, selecciona fecha de inicio y fecha final para el filtro.")
+        return
+    lo, hi = dates
+    df = pagos_df[(pagos_df["Fecha"] >= lo) & (pagos_df["Fecha"] <= hi)]
+    if sel != "Todos":
+        df = df[df["Miembro"] == sel]
+    df_edit = df.copy()
+    df_edit["Cantidad_fmt"] = df_edit["Cantidad"].apply(format_quantity)
+    df_edit["Eliminar"] = False
+    edited = st.data_editor(
+        df_edit[["id", "Fecha", "Miembro", "Dias", "Cantidad_fmt", "Captura", "Eliminar"]],
+        column_config={
+            "id": {"hidden": True},
+            "Captura": {"title": "Captura (ruta)", "type": "text", "disabled": True},
+            "Cantidad_fmt": {"title": "Cantidad"},
+            "Eliminar": {"type": "boolean"},
+        }, use_container_width=True, key="hist_editor"
+    )
+    if st.button("Guardar cambios", key="hist_save"):
+        keep = edited[~edited["Eliminar"]].copy()
+        keep["Cantidad"] = keep["Cantidad_fmt"].apply(parse_quantity)
+        keep["Fecha"] = pd.to_datetime(keep["Fecha"], errors="coerce").dt.date
+        df_ids = set(df["id"])
+        keep_ids = set(keep["id"])
+        deleted_ids = df_ids - keep_ids
+        old_df = load_payments(conn)
+        for _, row in old_df[old_df["id"].isin(deleted_ids)].iterrows():
+            if row["Captura"]:
+                path = os.path.join(SCREENSHOT_DIR, row["Captura"])
                 if os.path.exists(path):
-                    col.image(path, width=150)
-                    col.markdown(
-                        f"<div style='text-align:left;'><strong>{r.Miembro}</strong><br>{r.Fecha:%Y-%m-%d}</div>",
-                        unsafe_allow_html=True,
-                    )
-options = [""]
-paths = {}
-for r in df_cap.itertuples():
-    fn = r.Captura
-    if fn:
-        opt = f"{r.Miembro} — {r.Fecha:%Y-%m-%d}"
-        options.append(opt)
-        paths[opt] = os.path.join(SCREENSHOT_DIR, fn)
-sel = st.selectbox("Selecciona captura para ampliar:", options)
-if sel:
-    st.image(paths[sel], use_container_width=True)
+                    os.remove(path)
+        all_remaining = old_df[~old_df["id"].isin(deleted_ids)][RAW_COLS]
+        conn.execute("DELETE FROM pagos")
+        conn.commit()
+        for _, row in all_remaining.iterrows():
+            save_payment(conn, row["Fecha"], row["Miembro"], row["Dias"], row["Cantidad"], row["Captura"])
+        st.success("📝 Cambios guardados")
+
+
+def show_capturas(conn, config):
+    pagos_df = load_payments(conn)
+    st.subheader("📸 Capturas de pagos")
+    members = ["Todos"] + sorted(config["Miembro"].unique())
+    sel = st.selectbox("Mostrar capturas de:", members, key="cap_member")
+    df = pagos_df if sel == "Todos" else pagos_df[pagos_df["Miembro"] == sel]
+    df = df.sort_values("Fecha", ascending=False)
+    if "show_all_caps" not in st.session_state:
+        st.session_state["show_all_caps"] = False
+    btn_text = "Mostrar todas capturas" if not st.session_state["show_all_caps"] else "Mostrar sólo últimas 5"
+    if st.button(btn_text, key="cap_toggle"):
+        st.session_state["show_all_caps"] = not st.session_state["show_all_caps"]
+    display_df = df if st.session_state["show_all_caps"] else df.head(5)
+    for _, row in display_df.iterrows():
+        if not row["Captura"]:
+            continue
+        path = os.path.join(SCREENSHOT_DIR, row["Captura"])
+        if not os.path.exists(path):
+            continue
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            st.image(path, width=100)
+        with c2:
+            st.markdown(f"**Miembro:** {row['Miembro']}")
+            st.markdown(f"**Fecha:** {row['Fecha']}")
+            st.markdown(f"**Cantidad:** {format_quantity(row['Cantidad'])}")
+            with st.expander("🔍 Ampliar captura"):
+                st.image(path, use_container_width=True)
+        st.markdown("---")
+
+
+def main():
+    conn = init_db()
+    config = pd.read_csv(CONFIG_FILE)
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    st.set_page_config(layout="wide")
+    st.title("💰 Control de Donaciones")
+    role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
+    pw = st.sidebar.text_input("Contraseña de admin", type="password", key="admin")
+    if role == "Miembro":
+        member_view(conn, config)
+        return
+    if pw.strip() != st.secrets.get("admin_password", ""):
+        st.error("Acceso denegado")
+        return
+    st.sidebar.success("👑 Acceso admin concedido")
+    st_autorefresh(interval=5000, key="datarefresh")
+    pagos_df = load_payments(conn)
+    show_notifications(pagos_df)
+    admin_dashboard(pagos_df, config)
+    show_historial(conn, config)
+    show_capturas(conn, config)
+
+
+if __name__ == "__main__":
+    main()
