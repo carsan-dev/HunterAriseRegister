@@ -124,8 +124,16 @@ def upload_capture_to_storage(fecha, miembro, captura):
             break
         path = f"{base.rsplit('.',1)[0]}_{i}.png"
         i += 1
-    buf = BytesIO(captura.getbuffer())
-    supabase_admin.storage.from_(BUCKET).upload(path, buf)
+    tmp_dir = "/tmp/supabase_uploads"
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp_path = os.path.join(tmp_dir, path)
+    with open(tmp_path, "wb") as f:
+        f.write(captura.getbuffer())
+    supabase_admin.storage.from_(BUCKET).upload(path, tmp_path)
+    try:
+        os.remove(tmp_path)
+    except OSError:
+        pass
     return path
 
 
