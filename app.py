@@ -214,7 +214,7 @@ def show_historial(config):
     members = ["Todos"] + sorted(config["Miembro"].unique())
     sel = st.selectbox("Filtrar por miembro", members, key="hist_member")
     if pagos_df.empty:
-        lo = max_val = date.today()
+        lo = hi = date.today()
     else:
         lo = pagos_df["Fecha"].min()
         hi = pagos_df["Fecha"].max()
@@ -226,7 +226,7 @@ def show_historial(config):
     if sel != "Todos":
         df = df[df["Miembro"] == sel]
     df_edit = df.copy()
-    df_edit["Cantidad_fmt"] = df["Cantidad"].apply(format_quantity)
+    df_edit["Cantidad_fmt"] = df_edit["Cantidad"].apply(format_quantity)
     df_edit["Eliminar"] = False
     edited = st.data_editor(
         df_edit[
@@ -260,13 +260,11 @@ def show_capturas(config):
     df = df.sort_values("Fecha", ascending=False)
     if "show_all" not in st.session_state:
         st.session_state["show_all"] = False
-    if st.button(
-        "Mostrar todas" if not st.session_state["show_all"] else "Ocultar",
-        key="cap_toggle",
-    ):
+    btn = "Mostrar todas" if not st.session_state["show_all"] else "Ocultar"
+    if st.button(btn, key="cap_toggle"):
         st.session_state["show_all"] = not st.session_state["show_all"]
-    disp = df if st.session_state["show_all"] else df.head(5)
-    for _, r in disp.iterrows():
+    display = df if st.session_state["show_all"] else df.head(5)
+    for _, r in display.iterrows():
         if not r["Captura"]:
             continue
         path = os.path.join(SCREENSHOT_DIR, r["Captura"])
