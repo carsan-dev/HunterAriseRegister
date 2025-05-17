@@ -125,7 +125,7 @@ def upload_capture_to_storage(fecha, miembro, captura):
         path = f"{base.rsplit('.',1)[0]}_{i}.png"
         i += 1
     buf = BytesIO(captura.getbuffer())
-    supabase_admin.storage.from_(BUCKET).upload(path, buf, content_type=captura.type)
+    supabase_admin.storage.from_(BUCKET).upload(path, buf)
     return path
 
 
