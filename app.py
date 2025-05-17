@@ -139,7 +139,7 @@ def upload_capture_to_storage(fecha, miembro, captura):
 
 def get_signed_url(path, expires=3600):
     url_data = supabase_admin.storage.from_(BUCKET).create_signed_url(path, expires)
-    return url_data.get('signedURL', '')
+    return url_data.get("signedURL", "")
 
 
 def member_view(config):
@@ -307,9 +307,14 @@ def main():
     st.set_page_config(layout="wide")
     st.title("💰 Control de Donaciones con Supabase")
     role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
-    st.session_state["admin_pw"] = st.sidebar.text_input(
-        "Contraseña admin", type="password", value=st.session_state["admin_pw"]
+    st.sidebar.text_input(
+        "Contraseña admin",
+        type="password",
+        value=st.session_state["admin_pw"],
+        key="admin_pw",
     )
+    if st.sidebar.button("🔄 Refrescar datos"):
+        st.experimental_rerun()
     if role == "Miembro":
         member_view(config)
         return
@@ -317,7 +322,7 @@ def main():
         st.error("Acceso denegado")
         return
     st.sidebar.success("👑 Acceso admin concedido")
-    st_autorefresh(interval=10000, key="datarefresh")
+    st_autorefresh(interval=30000, key="datarefresh")
     pagos_df = load_payments()
     show_notifications(pagos_df)
     admin_dashboard(pagos_df, config)
