@@ -283,7 +283,7 @@ def main():
     config = load_config()
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     st.set_page_config(layout="wide")
-    st.title("💰 Control de Donaciones con Supabase")
+    st.title("💰 Control de Donaciones de HunterArise")
     role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
     if role == "Miembro":
         member_view(config)
