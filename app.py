@@ -16,12 +16,17 @@ SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+if "admin_pw" not in st.session_state:
+    st.session_state["admin_pw"] = ""
+
+
 def parse_quantity(qstr):
     q = qstr.strip().lower()
     for suf, mul in SUFFIX_MAP.items():
         if q.endswith(suf):
-            return float(q[:-len(suf)]) * mul
+            return float(q[: -len(suf)]) * mul
     return float(q)
+
 
 def format_quantity(units):
     for suf in ("sp", "sx", "qi"):
@@ -34,6 +39,7 @@ def format_quantity(units):
             return f"{s}{suf}"
     return f"{units}qi"
 
+
 def load_config():
     df = pd.read_csv(CONFIG_FILE)
     first = df.columns[0]
@@ -41,40 +47,57 @@ def load_config():
         df = df.rename(columns={first: "Miembro"})
     return df
 
+
 def load_payments():
-    res = supabase.table("pagos").select("id, fecha, miembro, dias, cantidad, captura").execute()
+    res = (
+        supabase.table("pagos")
+        .select("id, fecha, miembro, dias, cantidad, captura")
+        .execute()
+    )
     data = res.data or []
-    df = pd.DataFrame(data, columns=["id", "fecha", "miembro", "dias", "cantidad", "captura"])
-    df = df.rename(columns={
-        "fecha": "Fecha",
-        "miembro": "Miembro",
-        "dias": "Dias",
-        "cantidad": "Cantidad",
-        "captura": "Captura"
-    })
+    df = pd.DataFrame(
+        data, columns=["id", "fecha", "miembro", "dias", "cantidad", "captura"]
+    )
+    df = df.rename(
+        columns={
+            "fecha": "Fecha",
+            "miembro": "Miembro",
+            "dias": "Dias",
+            "cantidad": "Cantidad",
+            "captura": "Captura",
+        }
+    )
     df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce").dt.date
     return df
 
+
 def save_payment(fecha, miembro, dias, cantidad, captura):
-    supabase.table("pagos").insert({
-        "fecha": fecha.isoformat(),
-        "miembro": miembro,
-        "dias": dias,
-        "cantidad": cantidad,
-        "captura": captura
-    }).execute()
+    supabase.table("pagos").insert(
+        {
+            "fecha": fecha.isoformat(),
+            "miembro": miembro,
+            "dias": dias,
+            "cantidad": cantidad,
+            "captura": captura,
+        }
+    ).execute()
+
 
 def delete_all_and_insert(df_full):
     supabase.table("pagos").delete().neq("id", 0).execute()
-    records = [{
-        "fecha": row["Fecha"].isoformat(),
-        "miembro": row["Miembro"],
-        "dias": row["Dias"],
-        "cantidad": row["Cantidad"],
-        "captura": row["Captura"]
-    } for _, row in df_full.iterrows()]
+    records = [
+        {
+            "fecha": row["Fecha"].isoformat(),
+            "miembro": row["Miembro"],
+            "dias": row["Dias"],
+            "cantidad": row["Cantidad"],
+            "captura": row["Captura"],
+        }
+        for _, row in df_full.iterrows()
+    ]
     if records:
         supabase.table("pagos").insert(records).execute()
+
 
 def compute_expiry(group):
     exp = None
@@ -85,6 +108,7 @@ def compute_expiry(group):
         else:
             exp += pd.to_timedelta(d, unit="d")
     return exp
+
 
 def member_view(config):
     miembro = st.selectbox("Tu nombre", config["Miembro"])
@@ -97,7 +121,7 @@ def member_view(config):
         est = q / qd if qd > 0 else 0
         days_str = str(int(est)) if float(est).is_integer() else f"{est:.2f}"
         st.info(f"{format_quantity(q)} equivale a {days_str} día(s)")
-    except:
+    except ValueError:
         st.error("Error al calcular la cantidad. Revisa el formato.")
     captura = st.file_uploader("Comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"])
     if st.button("Registrar pago"):
@@ -120,9 +144,10 @@ def member_view(config):
                         f.write(captura.getbuffer())
                 save_payment(fecha, miembro, dias, q, fn)
                 st.success("✅ Pago registrado")
-        except:
+        except ValueError:
             st.error("Error al registrar. Verifica los datos.")
     st.stop()
+
 
 def show_notifications(pagos_df):
     if "last_count" not in st.session_state:
@@ -134,13 +159,15 @@ def show_notifications(pagos_df):
         for i in range(st.session_state["last_count"], new_count):
             p = pagos_sorted.iloc[i]
             ph = st.sidebar.empty()
-            st.session_state["pending_notifications"].append({
-                "time": datetime.now(tz=ESP),
-                "Miembro": p["Miembro"],
-                "Cantidad": p["Cantidad"],
-                "Dias": p["Dias"],
-                "placeholder": ph
-            })
+            st.session_state["pending_notifications"].append(
+                {
+                    "time": datetime.now(tz=ESP),
+                    "Miembro": p["Miembro"],
+                    "Cantidad": p["Cantidad"],
+                    "Dias": p["Dias"],
+                    "placeholder": ph,
+                }
+            )
         st.session_state["last_count"] = new_count
     now = datetime.now(tz=ESP)
     kept = []
@@ -154,6 +181,7 @@ def show_notifications(pagos_df):
             n["placeholder"].empty()
     st.session_state["pending_notifications"] = kept
 
+
 def admin_dashboard(pagos_df, config):
     st.header("🔑 Panel de Administración")
     rows = []
@@ -161,7 +189,13 @@ def admin_dashboard(pagos_df, config):
     for m in config["Miembro"].unique():
         grp = pagos_df[pagos_df["Miembro"] == m]
         if grp.empty:
-            rows.append({"Miembro": m, "Días restantes": "Sin pagos", "Días atraso": "Sin pagos"})
+            rows.append(
+                {
+                    "Miembro": m,
+                    "Días restantes": "Sin pagos",
+                    "Días atraso": "Sin pagos",
+                }
+            )
         else:
             exp = compute_expiry(grp)
             left = max((exp.date() - today).days, 0)
@@ -170,6 +204,7 @@ def admin_dashboard(pagos_df, config):
     df = pd.DataFrame(rows)
     st.subheader("📋 Estado de miembros")
     st.table(df[["Miembro", "Días restantes", "Días atraso"]].astype(str))
+
 
 def show_historial(config):
     pagos_df = load_payments()
@@ -193,15 +228,17 @@ def show_historial(config):
     df_edit["Cantidad_fmt"] = df_edit["Cantidad"].apply(format_quantity)
     df_edit["Eliminar"] = False
     edited = st.data_editor(
-        df_edit[["id","Fecha","Miembro","Dias","Cantidad_fmt","Captura","Eliminar"]],
+        df_edit[
+            ["id", "Fecha", "Miembro", "Dias", "Cantidad_fmt", "Captura", "Eliminar"]
+        ],
         column_config={
             "id": {"hidden": True},
             "Captura": {"disabled": True},
             "Cantidad_fmt": {"title": "Cantidad"},
-            "Eliminar": {"type": "boolean"}
+            "Eliminar": {"type": "boolean"},
         },
         use_container_width=True,
-        key="hist_editor"
+        key="hist_editor",
     )
     if st.button("Guardar cambios", key="hist_save"):
         keep = edited[~edited["Eliminar"]].copy()
@@ -212,12 +249,13 @@ def show_historial(config):
         delete_all_and_insert(new_full)
         st.success("📝 Cambios guardados")
 
+
 def show_capturas(config):
     pagos_df = load_payments()
     st.subheader("📸 Capturas de pagos")
     members = ["Todos"] + sorted(config["Miembro"].unique())
     sel = st.selectbox("Mostrar capturas de:", members, key="cap_member")
-    df = pagos_df if sel=="Todos" else pagos_df[pagos_df["Miembro"]==sel]
+    df = pagos_df if sel == "Todos" else pagos_df[pagos_df["Miembro"] == sel]
     df = df.sort_values("Fecha", ascending=False)
     if "show_all" not in st.session_state:
         st.session_state["show_all"] = False
@@ -231,7 +269,7 @@ def show_capturas(config):
         path = os.path.join(SCREENSHOT_DIR, r["Captura"])
         if not os.path.exists(path):
             continue
-        c1, c2 = st.columns([1,3])
+        c1, c2 = st.columns([1, 3])
         with c1:
             st.image(path, width=100)
         with c2:
@@ -242,17 +280,20 @@ def show_capturas(config):
                 st.image(path, use_container_width=True)
         st.markdown("---")
 
+
 def main():
     config = load_config()
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     st.set_page_config(layout="wide")
     st.title("💰 Control de Donaciones con Supabase")
-    role = st.sidebar.selectbox("¿Quién eres?", ["Miembro","Administrador"])
-    if role=="Miembro":
+    role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
+    st.session_state["admin_pw"] = st.sidebar.text_input(
+        "Contraseña admin", type="password", value=st.session_state["admin_pw"]
+    )
+    if role == "Miembro":
         member_view(config)
         return
-    pw = st.sidebar.text_input("Contraseña admin", type="password")
-    if pw!=st.secrets.get("admin_password",""):
+    if st.session_state["admin_pw"] != st.secrets.get("admin_password", ""):
         st.error("Acceso denegado")
         return
     st.sidebar.success("👑 Acceso admin concedido")
@@ -263,5 +304,6 @@ def main():
     show_historial(config)
     show_capturas(config)
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()
