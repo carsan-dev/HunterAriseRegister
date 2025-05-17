@@ -115,26 +115,20 @@ def compute_expiry(group):
 
 
 def upload_capture_to_storage(fecha, miembro, captura):
-    base = f"{fecha.strftime('%Y%m%d')}_{miembro}.png"
-    path = base
-    i = 1
-    while True:
-        existing = supabase_admin.storage.from_(BUCKET).list(path)
-        if not existing:
-            break
-        path = f"{base.rsplit('.',1)[0]}_{i}.png"
-        i += 1
+    import uuid
+    ext = os.path.splitext(captura.name)[1] if hasattr(captura, 'name') else ".png"
+    filename = f"{fecha.strftime('%Y%m%d')}_{miembro}_{uuid.uuid4().hex}{ext}"
     tmp_dir = "/tmp/supabase_uploads"
     os.makedirs(tmp_dir, exist_ok=True)
-    tmp_path = os.path.join(tmp_dir, path)
+    tmp_path = os.path.join(tmp_dir, filename)
     with open(tmp_path, "wb") as f:
         f.write(captura.getbuffer())
-    supabase_admin.storage.from_(BUCKET).upload(path, tmp_path)
+    supabase_admin.storage.from_(BUCKET).upload(filename, tmp_path)
     try:
         os.remove(tmp_path)
     except OSError:
         pass
-    return path
+    return filename
 
 
 def get_signed_url(path, expires=3600):
