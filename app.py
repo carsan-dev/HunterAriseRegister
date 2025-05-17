@@ -138,8 +138,8 @@ def upload_capture_to_storage(fecha, miembro, captura):
 
 
 def get_signed_url(path, expires=3600):
-    url_data = supabase.storage.from_(BUCKET).create_signed_url(path, expires)
-    return url_data.get("signedURL", "")
+    url_data = supabase_admin.storage.from_(BUCKET).create_signed_url(path, expires)
+    return url_data.get('signedURL', '')
 
 
 def member_view(config):
