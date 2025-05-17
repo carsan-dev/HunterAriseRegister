@@ -313,8 +313,7 @@ def main():
         value=st.session_state["admin_pw"],
         key="admin_pw",
     )
-    if st.sidebar.button("🔄 Refrescar datos"):
-        st.experimental_rerun()
+    en_ref = st.sidebar.button("🔄 Refrescar datos")
     if role == "Miembro":
         member_view(config)
         return
