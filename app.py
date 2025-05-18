@@ -299,7 +299,7 @@ def show_capturas(config):
 def main():
     config = load_config()
     st.set_page_config(layout="wide")
-    st.title("💰 Control de Donaciones con Supabase")
+    st.title("💰 Control de Donaciones de HunterArise")
     role = st.sidebar.selectbox("¿Quién eres?", ["Miembro", "Administrador"])
     st.sidebar.text_input(
         "Contraseña admin",
