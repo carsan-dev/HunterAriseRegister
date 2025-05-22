@@ -161,7 +161,7 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
-    params = st.experimental_get_query_params()
+    params = st.query_params()
     if "code" not in params:
         state = uuid.uuid4().hex
         st.session_state["oauth_state"] = state
