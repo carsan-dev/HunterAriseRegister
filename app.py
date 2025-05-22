@@ -169,17 +169,18 @@ def authenticate_discord():
     bot_token = st.secrets["DISCORD_BOT_TOKEN"]
     guild_id = st.secrets["DISCORD_GUILD_ID"]
     role_id = st.secrets["DISCORD_ROLE_ID"]
+
     if "code" not in params:
-        ru = quote_plus(redirect_uri)
         url = (
             "https://discord.com/api/oauth2/authorize"
             f"?client_id={client_id}"
-            f"&redirect_uri={ru}"
+            f"&redirect_uri={redirect_uri}"
             "&response_type=code"
             "&scope=identify%20guilds.members.read"
         )
         st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
         st.stop()
+
     code = params["code"][0]
     token_url = "https://discord.com/api/oauth2/token"
     data = {
@@ -189,11 +190,13 @@ def authenticate_discord():
         "code": code,
         "redirect_uri": redirect_uri,
     }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_resp = requests.post(token_url, data=urlencode(data), headers=headers)
+
+    token_resp = requests.post(token_url, data=data)
     st.write(token_resp.status_code, token_resp.text)
     token_resp.raise_for_status()
+
     access_token = token_resp.json()["access_token"]
+
     user_resp = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -201,6 +204,7 @@ def authenticate_discord():
     user_resp.raise_for_status()
     user = user_resp.json()
     user_id = user["id"]
+
     member_resp = requests.get(
         f"https://discord.com/api/v10/guilds/{guild_id}/members/{user_id}",
         headers={"Authorization": f"Bot {bot_token}"},
@@ -209,6 +213,7 @@ def authenticate_discord():
     member = member_resp.json()
     if role_id not in member.get("roles", []):
         st.stop()
+
     nick = member.get("nick") or user["username"]
     return user_id, nick
 
