@@ -1,13 +1,14 @@
-import re
-import uuid
+from logging import config
 import streamlit as st
 import pandas as pd
 import os
+import re
+import requests
+import uuid
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
-import requests
 
 CONFIG_FILE = "config.csv"
 ESP = ZoneInfo("Europe/Madrid")
@@ -17,13 +18,21 @@ RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_ANON_KEY = st.secrets["SUPABASE_KEY"]
 SUPABASE_SERVICE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_ANON_KEY)
-
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BUCKET = "screenshots"
 
-if "admin_pw" not in st.session_state:
-    st.session_state["admin_pw"] = ""
+
+def init_session():
+    if "admin_pw" not in st.session_state:
+        st.session_state["admin_pw"] = ""
+    if "last_count" not in st.session_state:
+        st.session_state["last_count"] = 0
+    if "pending_notifications" not in st.session_state:
+        st.session_state["pending_notifications"] = []
+
+
+init_session()
 
 
 def parse_quantity(qstr):
@@ -47,17 +56,13 @@ def format_quantity(units):
 
 
 def load_config():
-    """
-    Obtiene todos los miembros del GUILD_ID que tengan el rol ROLE_ID
-    y los devuelve en un DataFrame con columna 'Miembro'.
-    """
     token = st.secrets["DISCORD_BOT_TOKEN"]
     guild_id = st.secrets["DISCORD_GUILD_ID"]
     role_id = st.secrets["DISCORD_ROLE_ID"]
     url = f"https://discord.com/api/v10/guilds/{guild_id}/members"
     headers = {"Authorization": f"Bot {token}"}
     params = {"limit": 1000}
-    miembros = []
+    rows = []
 
     while True:
         resp = requests.get(url, headers=headers, params=params)
@@ -67,12 +72,12 @@ def load_config():
             if role_id in m.get("roles", []):
                 u = m["user"]
                 nick = m.get("nick") or u["username"]
-                miembros.append(nick)
+                rows.append({"user_id": u["id"], "nick": nick})
         if len(data) < 1000:
             break
         params["after"] = data[-1]["user"]["id"]
 
-    return pd.DataFrame({"Miembro": miembros})
+    return pd.DataFrame(rows)
 
 
 def load_payments():
@@ -139,14 +144,10 @@ def compute_expiry(group):
 
 def upload_capture_to_storage(fecha, miembro, captura):
     ext = os.path.splitext(captura.name)[1] if hasattr(captura, "name") else ".png"
-
     raw = miembro
     ascii_nombre = raw.encode("ascii", "ignore").decode()
-    safe_nombre = re.sub(r"[^A-Za-z0-9_-]", "_", ascii_nombre)
-    safe_nombre = safe_nombre[:50]
-
+    safe_nombre = re.sub(r"[^A-Za-z0-9_-]", "_", ascii_nombre)[:50]
     uid = uuid.uuid4().hex
-
     fecha_str = fecha.strftime("%Y%m%d")
     if safe_nombre:
         filename = f"{fecha_str}_{safe_nombre}_{uid}{ext}"
@@ -160,7 +161,6 @@ def upload_capture_to_storage(fecha, miembro, captura):
         f.write(captura.getbuffer())
 
     supabase_admin.storage.from_(BUCKET).upload(filename, tmp_path)
-
     try:
         os.remove(tmp_path)
     except OSError:
@@ -175,7 +175,9 @@ def get_signed_url(path, expires=3600):
 
 
 def member_view(config):
-    miembro = st.selectbox("Tu nombre", config["Miembro"])
+    choice = st.selectbox("Tu nombre", options=config["nick"].tolist())
+    user_id = config.loc[config["nick"] == choice, "user_id"].iat[0]
+
     fecha = st.date_input("Fecha de la donación", datetime.now(tz=ESP).date())
     cantidad_str = st.text_input("Cantidad pagada (ej. 1sx)", "1sx")
     qi_dia_str = st.text_input("Sx por día (ej. 1sx)", "1sx")
@@ -187,6 +189,7 @@ def member_view(config):
         st.info(f"{format_quantity(q)} equivale a {days_str} día(s)")
     except ValueError:
         st.error("Error al calcular la cantidad.")
+
     captura = st.file_uploader("Comprobante (PNG/JPG)", type=["png", "jpg", "jpeg"])
     if st.button("Registrar pago"):
         try:
@@ -197,8 +200,8 @@ def member_view(config):
             else:
                 captura_path = ""
                 if captura:
-                    captura_path = upload_capture_to_storage(fecha, miembro, captura)
-                save_payment(fecha, miembro, dias, q, captura_path)
+                    captura_path = upload_capture_to_storage(fecha, user_id, captura)
+                save_payment(fecha, user_id, dias, q, captura_path)
                 st.success("✅ Pago registrado")
         except ValueError:
             st.error("Error al registrar.")
@@ -206,9 +209,6 @@ def member_view(config):
 
 
 def show_notifications(pagos_df):
-    if "last_count" not in st.session_state:
-        st.session_state["last_count"] = len(pagos_df)
-        st.session_state["pending_notifications"] = []
     new_count = len(pagos_df)
     if new_count > st.session_state["last_count"]:
         ps = pagos_df.sort_values("Fecha").reset_index(drop=True)
@@ -229,8 +229,9 @@ def show_notifications(pagos_df):
     kept = []
     for n in st.session_state["pending_notifications"]:
         if (now - n["time"]).total_seconds() < 30:
+            nick = config.loc[config["user_id"] == n["Miembro"], "nick"].iat[0]
             n["placeholder"].info(
-                f"🔔 Pago: **{n['Miembro']}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
+                f"🔔 Pago: **{nick}** — {format_quantity(n['Cantidad'])} ({n['Dias']} días)"
             )
             kept.append(n)
         else:
@@ -240,14 +241,14 @@ def show_notifications(pagos_df):
 
 def admin_dashboard(pagos_df, config):
     st.header("🔑 Panel de Administración")
-    rows = []
     today = datetime.now(tz=ESP).date()
-    for m in config["Miembro"].unique():
-        grp = pagos_df[pagos_df["Miembro"] == m]
+    rows = []
+    for uid, nick in zip(config["user_id"], config["nick"]):
+        grp = pagos_df[pagos_df["Miembro"] == uid]
         if grp.empty:
             rows.append(
                 {
-                    "Miembro": m,
+                    "Miembro": nick,
                     "Días restantes": "Sin pagos",
                     "Días atraso": "Sin pagos",
                 }
@@ -256,50 +257,66 @@ def admin_dashboard(pagos_df, config):
             exp = compute_expiry(grp)
             left = max((exp.date() - today).days, 0)
             over = max((today - exp.date()).days, 0)
-            rows.append({"Miembro": m, "Días restantes": left, "Días atraso": over})
+            rows.append({"Miembro": nick, "Días restantes": left, "Días atraso": over})
     df = pd.DataFrame(rows)
     st.subheader("📋 Estado de miembros")
-    st.table(df[["Miembro", "Días restantes", "Días atraso"]].astype(str))
+    st.table(df)
 
 
 def show_historial(config):
     pagos_df = load_payments()
+    pagos_df["nick"] = pagos_df["Miembro"].map(
+        lambda uid: (
+            config.loc[config["user_id"] == uid, "nick"].iat[0]
+            if uid in config["user_id"].values
+            else uid
+        )
+    )
     st.subheader("🗂️ Historial de pagos")
-    members = ["Todos"] + sorted(config["Miembro"].unique())
+    members = ["Todos"] + sorted(config["nick"].unique())
     sel = st.selectbox("Filtrar por miembro", members, key="hist_member")
     if pagos_df.empty:
         lo = hi = date.today()
     else:
-        lo = pagos_df["Fecha"].min()
-        hi = pagos_df["Fecha"].max()
+        lo, hi = pagos_df["Fecha"].min(), pagos_df["Fecha"].max()
     dates = st.date_input("Rango de fechas", [lo, hi], key="hist_dates")
     if not isinstance(dates, (list, tuple)) or len(dates) != 2:
         st.error("Seleccione rango")
         return
     df = pagos_df[(pagos_df["Fecha"] >= dates[0]) & (pagos_df["Fecha"] <= dates[1])]
     if sel != "Todos":
-        df = df[df["Miembro"] == sel]
+        df = df[df["nick"] == sel]
+
     df_edit = df.copy()
     df_edit["Cantidad_fmt"] = df_edit["Cantidad"].apply(format_quantity)
     df_edit["Eliminar"] = False
-    edited = st.data_editor(
+    df_edit["Miembro_nick"] = df_edit["nick"]
+    editor = st.data_editor(
         df_edit[
-            ["id", "Fecha", "Miembro", "Dias", "Cantidad_fmt", "Captura", "Eliminar"]
+            [
+                "id",
+                "Fecha",
+                "Miembro_nick",
+                "Dias",
+                "Cantidad_fmt",
+                "Captura",
+                "Eliminar",
+            ]
         ],
         column_config={
             "id": {"hidden": True},
+            "Miembro_nick": {"title": "Miembro", "disabled": True},
             "Captura": {"disabled": True},
             "Cantidad_fmt": {"title": "Cantidad"},
-            "Eliminar": {"type": "boolean"},
         },
         use_container_width=True,
         key="hist_editor",
     )
     if st.button("Guardar cambios", key="hist_save"):
-        keep = edited[~edited["Eliminar"]].copy()
-        keep["Cantidad"] = keep["Cantidad_fmt"].apply(parse_quantity)
-        keep["Fecha"] = pd.to_datetime(keep["Fecha"]).dt.date
-        outside = load_payments()[~load_payments()["id"].isin(df["id"])]
+        keep_ids = editor.loc[~editor["Eliminar"], "id"]
+        orig = load_payments()
+        outside = orig[~orig["id"].isin(df["id"])]
+        keep = orig[orig["id"].isin(keep_ids)]
         new_full = pd.concat([outside[RAW_COLS], keep[RAW_COLS]], ignore_index=True)
         delete_all_and_insert(new_full)
         st.success("📝 Cambios guardados")
@@ -307,17 +324,25 @@ def show_historial(config):
 
 def show_capturas(config):
     pagos_df = load_payments()
+    pagos_df["nick"] = pagos_df["Miembro"].map(
+        lambda uid: (
+            config.loc[config["user_id"] == uid, "nick"].iat[0]
+            if uid in config["user_id"].values
+            else uid
+        )
+    )
     st.subheader("📸 Capturas de pagos")
-    members = ["Todos"] + sorted(config["Miembro"].unique())
+    members = ["Todos"] + sorted(config["nick"].unique())
     sel = st.selectbox("Mostrar capturas de:", members, key="cap_member")
-    df = pagos_df if sel == "Todos" else pagos_df[pagos_df["Miembro"] == sel]
-    df = df.sort_values("Fecha", ascending=False)
+    if sel != "Todos":
+        pagos_df = pagos_df[pagos_df["nick"] == sel]
+    pagos_df = pagos_df.sort_values("Fecha", ascending=False)
     if "show_all" not in st.session_state:
         st.session_state["show_all"] = False
     btn = "Mostrar todas" if not st.session_state["show_all"] else "Ocultar"
     if st.button(btn, key="cap_toggle"):
         st.session_state["show_all"] = not st.session_state["show_all"]
-    display = df if st.session_state["show_all"] else df.head(5)
+    display = pagos_df if st.session_state["show_all"] else pagos_df.head(5)
     for _, r in display.iterrows():
         if not r["Captura"]:
             continue
@@ -326,7 +351,7 @@ def show_capturas(config):
         with c1:
             st.image(url, width=100)
         with c2:
-            st.markdown(f"**Miembro:** {r['Miembro']}")
+            st.markdown(f"**Miembro:** {r['nick']}")
             st.markdown(f"**Fecha:** {r['Fecha']}")
             st.markdown(f"**Cantidad:** {format_quantity(r['Cantidad'])}")
             with st.expander("🔍 Ampliar captura"):
@@ -345,7 +370,8 @@ def main():
         value=st.session_state["admin_pw"],
         key="admin_pw",
     )
-    en_ref = st.sidebar.button("🔄 Refrescar datos")
+    st.sidebar.button("🔄 Refrescar datos")
+
     if role == "Miembro":
         member_view(config)
         return
