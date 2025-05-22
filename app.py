@@ -75,8 +75,7 @@ def delete_all_and_insert(df_full):
 
 def upload_capture_to_storage(fecha, miembro, captura):
     ext = os.path.splitext(captura.name)[1] if hasattr(captura, "name") else ".png"
-    raw = miembro
-    ascii_nombre = raw.encode("ascii", "ignore").decode()
+    ascii_nombre = str(miembro).encode("ascii", "ignore").decode()
     safe_nombre = re.sub(r"[^A-Za-z0-9_-]", "_", ascii_nombre)[:50]
     uid = uuid.uuid4().hex
     fecha_str = fecha.strftime("%Y%m%d")
@@ -232,6 +231,17 @@ def render_payment_form(user_id, nick):
     rate_str = st.text_input(
         "SX por día", value="1sx", help="Ejemplo: 1sx, 1.5sp, 500qi"
     )
+    try:
+        paid_qi = parse_quantity(paid_str)
+        rate_qi = parse_quantity(rate_str)
+        if rate_qi > 0:
+            dias_calc = paid_qi / rate_qi
+            dias_disp = (
+                int(dias_calc) if float(dias_calc).is_integer() else round(dias_calc, 2)
+            )
+            st.write(f"Corresponde a {dias_disp} días")
+    except ValueError:
+        pass
     captura = st.file_uploader("Captura")
     if st.button("Registrar pago"):
         handle_new_payment(fecha, user_id, paid_str, rate_str, captura)
@@ -255,6 +265,9 @@ def handle_new_payment(fecha, user_id, paid_str, rate_str, captura):
 
 
 def compute_and_show_metrics(user_payments, today):
+    if user_payments.empty:
+        st.info("No hay pagos registrados")
+        return
     total_paid_qi = user_payments["Cantidad"].sum()
     exp = compute_expiry(user_payments)
     dias_rest = max((exp.date() - today).days, 0)
@@ -273,7 +286,7 @@ def compute_and_show_metrics(user_payments, today):
 
 def render_payment_history(user_payments):
     if user_payments.empty:
-        st.info("Aún no tienes pagos registrados.")
+        st.table(pd.DataFrame([], columns=["Fecha", "Dias", "Cantidad"]))
         return
     df = user_payments.copy()
     df["Cantidad"] = df["Cantidad"].apply(format_quantity)
@@ -361,10 +374,11 @@ def show_historial(config):
     st.subheader("🗂️ Historial de pagos")
     members = ["Todos"] + sorted(config["nick"].tolist())
     sel = st.selectbox("Filtrar por miembro", members, key="hist_member")
-    if pagos_df.empty:
-        lo = hi = date.today()
-    else:
-        lo, hi = pagos_df["Fecha"].min(), pagos_df["Fecha"].max()
+    lo, hi = (
+        (date.today(), date.today())
+        if pagos_df.empty
+        else (pagos_df["Fecha"].min(), pagos_df["Fecha"].max())
+    )
     dates = st.date_input("Rango de fechas", [lo, hi], key="hist_dates")
     if len(dates) != 2:
         st.error("Seleccione rango")
