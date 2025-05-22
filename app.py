@@ -8,7 +8,7 @@ from supabase import create_client
 import requests
 import re
 import uuid
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -163,18 +163,20 @@ def authenticate_discord():
     params = st.query_params
     if "code" not in params:
         client_id = st.secrets["DISCORD_CLIENT_ID"]
-        redirect = quote(st.secrets["DISCORD_REDIRECT_URI"], safe="")
-        url = (
-            "https://discord.com/api/oauth2/authorize"
-            f"?client_id={client_id}"
-            f"&redirect_uri={redirect}"
-            "&response_type=code"
-            "&scope=identify"
-        )
+        redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
+        auth_params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "identify",
+        }
+        url = "https://discord.com/api/oauth2/authorize?" + urlencode(auth_params)
         st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
         st.stop()
+
     code = params["code"][0]
-    data = {
+    st.write("Código recibido:", code)
+    token_data = {
         "client_id": st.secrets["DISCORD_CLIENT_ID"],
         "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
         "grant_type": "authorization_code",
@@ -183,23 +185,31 @@ def authenticate_discord():
     }
     token_resp = requests.post(
         "https://discord.com/api/oauth2/token",
-        data=data,
+        data=token_data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    token_resp.raise_for_status()
-    st.experimental_set_query_params()
+
+    if token_resp.status_code != 200:
+        st.error("Token exchange falló:\n" + token_resp.text)
+        st.stop()
+
     access_token = token_resp.json()["access_token"]
+    st.experimental_set_query_params()
+
     user = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"},
     ).json()
     user_id = user["id"]
+
     member = requests.get(
         f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}/members/{user_id}",
         headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
     ).json()
+
     if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
         st.stop()
+
     nick = member.get("nick") or user["username"]
     return user_id, nick
 
