@@ -276,9 +276,21 @@ def show_historial(config):
     id_to_nick = dict(zip(config["user_id"], config["nick"]))
     df_edit["nick"] = df_edit["Miembro"].map(id_to_nick).fillna(df_edit["Miembro"])
     edited = st.data_editor(
-        df_edit[["id", "nick", "Fecha", "Dias", "Cantidad_fmt", "Captura", "Eliminar"]],
+        df_edit[
+            [
+                "id",
+                "Miembro",
+                "nick",
+                "Fecha",
+                "Dias",
+                "Cantidad_fmt",
+                "Captura",
+                "Eliminar",
+            ]
+        ],
         column_config={
             "id": {"hidden": True},
+            "Miembro": {"hidden": True},
             "nick": {"title": "Miembro"},
             "Cantidad_fmt": {"title": "Cantidad"},
             "Captura": {"disabled": True},
