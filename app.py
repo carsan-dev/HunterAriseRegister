@@ -8,7 +8,7 @@ from supabase import create_client
 import requests
 import re
 import uuid
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -161,22 +161,27 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
-    params = st.query_params
+    params = st.experimental_get_query_params()
     if "code" not in params:
-        client_id = st.secrets["DISCORD_CLIENT_ID"]
-        redirect = st.secrets["DISCORD_REDIRECT_URI"]
-        redirect_enc = quote(redirect, safe="")
-        url = (
-            "https://discord.com/api/oauth2/authorize"
-            f"?client_id={client_id}"
-            f"&redirect_uri={redirect_enc}"
-            "&response_type=code"
-            "&scope=identify"
-        )
+        state = uuid.uuid4().hex
+        st.session_state["oauth_state"] = state
+        auth = {
+            "client_id": st.secrets["DISCORD_CLIENT_ID"],
+            "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
+            "response_type": "code",
+            "scope": "identify",
+            "state": state,
+        }
+        url = "https://discord.com/api/oauth2/authorize?" + urlencode(auth)
         st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
         st.stop()
+    if "state" not in params or params["state"][0] != st.session_state.get(
+        "oauth_state"
+    ):
+        st.error("Invalid state")
+        st.stop()
     code = params["code"][0]
-    data = {
+    token_data = {
         "client_id": st.secrets["DISCORD_CLIENT_ID"],
         "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
         "grant_type": "authorization_code",
@@ -185,7 +190,7 @@ def authenticate_discord():
     }
     token_resp = requests.post(
         "https://discord.com/api/oauth2/token",
-        data=data,
+        data=token_data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     token_resp.raise_for_status()
