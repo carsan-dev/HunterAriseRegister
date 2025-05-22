@@ -5,7 +5,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 import requests
 import re
 import uuid
@@ -181,6 +181,7 @@ def authenticate_discord():
         st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
         st.stop()
     code = params["code"][0]
+    token_url = "https://discord.com/api/oauth2/token"
     data = {
         "client_id": client_id,
         "client_secret": client_secret,
@@ -189,14 +190,9 @@ def authenticate_discord():
         "redirect_uri": redirect_uri,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_resp = requests.post(
-        "https://discord.com/api/oauth2/token", data=data, headers=headers
-    )
-    try:
-        token_resp.raise_for_status()
-    except Exception:
-        st.error(token_resp.text)
-        st.stop()
+    token_resp = requests.post(token_url, data=urlencode(data), headers=headers)
+    st.write(token_resp.status_code, token_resp.text)
+    token_resp.raise_for_status()
     access_token = token_resp.json()["access_token"]
     user_resp = requests.get(
         "https://discord.com/api/users/@me",
@@ -209,8 +205,7 @@ def authenticate_discord():
         f"https://discord.com/api/v10/guilds/{guild_id}/members/{user_id}",
         headers={"Authorization": f"Bot {bot_token}"},
     )
-    if member_resp.status_code != 200:
-        st.stop()
+    member_resp.raise_for_status()
     member = member_resp.json()
     if role_id not in member.get("roles", []):
         st.stop()
