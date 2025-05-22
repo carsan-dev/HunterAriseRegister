@@ -165,14 +165,14 @@ def start_challenge():
         return
     with st.form("start_challenge", clear_on_submit=True):
         user_id = st.text_input("🔑 Escribe tu Discord user ID")
-        submit = st.form_submit_button("Enviar")
-    if submit and user_id:
+        submitted = st.form_submit_button("Enviar")
+    if submitted and user_id:
         code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
         st.session_state["challenge"] = code
         st.session_state["candidate_id"] = user_id
         st.session_state["step"] = 2
         send_challenge_dm(user_id, code)
-        st.stop()
+        st.experimental_rerun()
 
 
 def send_challenge_dm(user_id, code):
