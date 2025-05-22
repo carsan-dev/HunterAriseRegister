@@ -172,7 +172,6 @@ def start_challenge():
         st.session_state["candidate_id"] = user_id
         st.session_state["step"] = 2
         send_challenge_dm(user_id, code)
-        st.experimental_rerun()
 
 
 def send_challenge_dm(user_id, code):
