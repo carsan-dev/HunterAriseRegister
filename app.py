@@ -160,6 +160,9 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
+    if "user_id" in st.session_state and "nick" in st.session_state:
+        return st.session_state["user_id"], st.session_state["nick"]
+
     client_id = st.secrets["DISCORD_CLIENT_ID"]
     client_secret = st.secrets["DISCORD_CLIENT_SECRET"]
     redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
@@ -212,6 +215,10 @@ def authenticate_discord():
         st.stop()
 
     nick = member.get("nick") or user["username"]
+
+    st.session_state["user_id"] = user_id
+    st.session_state["nick"] = nick
+
     return user_id, nick
 
 
