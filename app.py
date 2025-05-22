@@ -191,7 +191,7 @@ def authenticate_discord():
     if token_resp.status_code != 200:
         st.query_params = {}
         st.error("Token exchange falló:\n" + token_resp.text)
-        st.experimental_rerun()
+        st.stop()
 
     access_token = token_resp.json()["access_token"]
     st.query_params = {}
