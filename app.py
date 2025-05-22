@@ -175,7 +175,6 @@ def start_challenge():
         send_challenge_dm(user_id, code)
         st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
         start_ph.empty()
-    st.stop()
 
 
 def send_challenge_dm(user_id, code):
@@ -237,11 +236,13 @@ def authenticate_discord():
     st.session_state.setdefault("step", 1)
     if st.session_state["step"] == 1:
         start_challenge()
-    elif st.session_state["step"] == 2:
+        if st.session_state["step"] == 1:
+            st.stop()
+    if st.session_state["step"] == 2:
         result = verify_challenge()
         if result:
             return result
-    st.stop()
+        st.stop()
 
 
 def render_payment_form(user_id, nick, config):
