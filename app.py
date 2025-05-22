@@ -161,7 +161,7 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
-    params = st.query_params()
+    params = st.experimental_get_query_params()
     if "code" not in params:
         state = uuid.uuid4().hex
         st.session_state["oauth_state"] = state
@@ -194,7 +194,7 @@ def authenticate_discord():
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     token_resp.raise_for_status()
-    st.query_params()
+    st.experimental_set_query_params()
     access_token = token_resp.json()["access_token"]
     user = requests.get(
         "https://discord.com/api/users/@me",
