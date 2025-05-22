@@ -194,7 +194,7 @@ def authenticate_discord():
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     token_resp.raise_for_status()
-    st.experimental_set_query_params()
+    st.query_params()
     access_token = token_resp.json()["access_token"]
     user = requests.get(
         "https://discord.com/api/users/@me",
