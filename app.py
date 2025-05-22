@@ -160,7 +160,7 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
-    params = st.experimental_get_query_params()
+    params = st.query_params
     client_id = st.secrets["DISCORD_CLIENT_ID"]
     client_secret = st.secrets["DISCORD_CLIENT_SECRET"]
     redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
