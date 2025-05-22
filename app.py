@@ -5,9 +5,11 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
+from urllib.parse import quote_plus
 import requests
 import re
 import uuid
+
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -168,10 +170,11 @@ def authenticate_discord():
     guild_id = st.secrets["DISCORD_GUILD_ID"]
     role_id = st.secrets["DISCORD_ROLE_ID"]
     if "code" not in params:
+        ru = quote_plus(redirect_uri)
         url = (
             "https://discord.com/api/oauth2/authorize"
             f"?client_id={client_id}"
-            f"&redirect_uri={redirect_uri}"
+            f"&redirect_uri={ru}"
             "&response_type=code"
             "&scope=identify%20guilds.members.read"
         )
@@ -184,10 +187,16 @@ def authenticate_discord():
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "scope": "identify guilds.members.read",
     }
-    token_resp = requests.post("https://discord.com/api/oauth2/token", data=data)
-    token_resp.raise_for_status()
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    token_resp = requests.post(
+        "https://discord.com/api/oauth2/token", data=data, headers=headers
+    )
+    try:
+        token_resp.raise_for_status()
+    except Exception:
+        st.error(token_resp.text)
+        st.stop()
     access_token = token_resp.json()["access_token"]
     user_resp = requests.get(
         "https://discord.com/api/users/@me",
