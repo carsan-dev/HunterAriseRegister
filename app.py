@@ -218,19 +218,29 @@ def authenticate_discord():
 def member_view_authenticated():
     user_id, nick = authenticate_discord()
     st.write(f"👋 Hola **{nick}**")
+
     pagos_df = load_payments()
     user_payments = pagos_df[pagos_df["Miembro"] == user_id]
+
     fecha = st.date_input("Fecha de pago", datetime.now(tz=ESP).date())
-    dias = st.number_input("Días", min_value=1, step=1)
-    cantidad_str = st.text_input("Cantidad (ej. 2qi, 1.5sx)")
+
+    paid_sx = st.number_input("Cantidad pagada (sx)", value=1.0, step=0.1)
+    rate_sx = st.number_input("SX por día", value=1.0, step=0.1)
+
     captura = st.file_uploader("Captura")
+
     if st.button("Registrar pago"):
-        if not (cantidad_str and captura):
-            st.error("Cantidad y captura son obligatorios.")
+        paid_qi = paid_sx * SUFFIX_MAP["sx"]
+        rate_qi = rate_sx * SUFFIX_MAP["sx"]
+        dias = int(paid_qi / rate_qi)
+
+        if dias < 1:
+            st.error("La cantidad pagada es insuficiente para generar al menos 1 día.")
+        elif not captura:
+            st.error("Debes subir una captura.")
         else:
-            cantidad = parse_quantity(cantidad_str)
             filename = upload_capture_to_storage(fecha, user_id, captura)
-            save_payment(fecha, user_id, dias, cantidad, filename)
+            save_payment(fecha, user_id, dias, paid_qi, filename)
             st.success("Pago registrado.")
             st.experimental_rerun()
 
@@ -242,6 +252,7 @@ def member_view_authenticated():
         dias_atra = max((fecha - exp.date()).days, 0)
         st.metric("Días restantes", dias_rest)
         st.metric("Días de atraso", dias_atra)
+
         df = user_payments.copy()
         df["Cantidad"] = df["Cantidad"].apply(format_quantity)
         st.subheader("Historial de pagos")
