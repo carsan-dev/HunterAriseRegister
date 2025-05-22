@@ -8,7 +8,7 @@ from supabase import create_client
 import requests
 import re
 import uuid
-from urllib.parse import urlencode
+from urllib.parse import quote
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -134,8 +134,7 @@ def load_payments():
     data = res.data or []
     df = pd.DataFrame(
         data, columns=["id", "fecha", "miembro", "dias", "cantidad", "captura"]
-    )
-    df = df.rename(
+    ).rename(
         columns={
             "fecha": "Fecha",
             "miembro": "Miembro",
@@ -163,25 +162,19 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 def authenticate_discord():
     params = st.query_params
     if "code" not in params:
-        state = uuid.uuid4().hex
-        st.session_state["oauth_state"] = state
-        auth = {
-            "client_id": st.secrets["DISCORD_CLIENT_ID"],
-            "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
-            "response_type": "code",
-            "scope": "identify",
-            "state": state,
-        }
-        url = "https://discord.com/api/oauth2/authorize?" + urlencode(auth)
+        client_id = st.secrets["DISCORD_CLIENT_ID"]
+        redirect = quote(st.secrets["DISCORD_REDIRECT_URI"], safe="")
+        url = (
+            "https://discord.com/api/oauth2/authorize"
+            f"?client_id={client_id}"
+            f"&redirect_uri={redirect}"
+            "&response_type=code"
+            "&scope=identify"
+        )
         st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
         st.stop()
-    if "state" not in params or params["state"][0] != st.session_state.get(
-        "oauth_state"
-    ):
-        st.error("Invalid state")
-        st.stop()
     code = params["code"][0]
-    token_data = {
+    data = {
         "client_id": st.secrets["DISCORD_CLIENT_ID"],
         "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
         "grant_type": "authorization_code",
@@ -190,7 +183,7 @@ def authenticate_discord():
     }
     token_resp = requests.post(
         "https://discord.com/api/oauth2/token",
-        data=token_data,
+        data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     token_resp.raise_for_status()
