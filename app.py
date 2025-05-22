@@ -168,7 +168,7 @@ def authenticate_discord():
         auth_url = (
             "https://discord.com/api/oauth2/authorize?"
             f"client_id={client_id}"
-            f"&redirect_uri={quote(redirect_uri, safe='')}"
+            f"&redirect_uri={redirect_uri}"
             "&response_type=code"
             "&scope=identify"
         )
@@ -191,7 +191,7 @@ def authenticate_discord():
     if token_resp.status_code != 200:
         st.query_params = {}
         st.error("Token exchange falló:\n" + token_resp.text)
-        st.stop()
+        st.experimental_rerun()
 
     access_token = token_resp.json()["access_token"]
     st.query_params = {}
