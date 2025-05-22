@@ -163,7 +163,8 @@ def save_payment(fecha, miembro, dias, cantidad, captura):
 def start_challenge():
     if st.session_state.get("step", 1) != 1:
         return
-    with st.form("start_challenge", clear_on_submit=True):
+    start_ph = st.empty()
+    with start_ph.form("start_challenge", clear_on_submit=True):
         user_id = st.text_input("🔑 Escribe tu Discord user ID")
         submitted = st.form_submit_button("Enviar")
     if submitted and user_id:
@@ -173,6 +174,8 @@ def start_challenge():
         st.session_state["step"] = 2
         send_challenge_dm(user_id, code)
         st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
+        start_ph.empty()
+    st.stop()
 
 
 def send_challenge_dm(user_id, code):
@@ -195,11 +198,12 @@ def send_challenge_dm(user_id, code):
 def verify_challenge():
     if st.session_state.get("step") != 2:
         return
-    with st.form("verify_challenge", clear_on_submit=True):
+    verify_ph = st.empty()
+    with verify_ph.form("verify_challenge", clear_on_submit=True):
         entry = st.text_input("📩 Escribe el código que recibiste por DM")
         submit = st.form_submit_button("Verificar")
     if not submit:
-        return
+        st.stop()
     if entry != st.session_state.get("challenge", ""):
         st.error("Código incorrecto. Reintenta.")
         st.stop()
@@ -223,6 +227,7 @@ def verify_challenge():
     nick = member.get("nick") or member["user"]["username"]
     st.session_state["user_id"] = uid
     st.session_state["nick"] = nick
+    verify_ph.empty()
     return uid, nick
 
 
@@ -232,12 +237,11 @@ def authenticate_discord():
     st.session_state.setdefault("step", 1)
     if st.session_state["step"] == 1:
         start_challenge()
-        st.stop()
     elif st.session_state["step"] == 2:
         result = verify_challenge()
         if result:
             return result
-        st.stop()
+    st.stop()
 
 
 def render_payment_form(user_id, nick, config):
