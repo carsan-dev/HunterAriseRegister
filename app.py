@@ -161,35 +161,35 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 def authenticate_discord():
     params = st.query_params
+
     if "code" not in params:
         client_id = st.secrets["DISCORD_CLIENT_ID"]
         redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
-        auth_params = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": "identify",
-        }
-        url = "https://discord.com/api/oauth2/authorize?" + urlencode(auth_params)
-        st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
+        auth_url = (
+            "https://discord.com/api/oauth2/authorize?"
+            f"client_id={client_id}"
+            f"&redirect_uri={quote(redirect_uri, safe='')}"
+            "&response_type=code"
+            "&scope=identify"
+        )
+        st.markdown(f"[🔐 Iniciar sesión con Discord]({auth_url})")
         st.stop()
 
     code = params["code"][0]
-    st.write("Código recibido:", code)
-    token_data = {
-        "client_id": st.secrets["DISCORD_CLIENT_ID"],
-        "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
-    }
     token_resp = requests.post(
         "https://discord.com/api/oauth2/token",
-        data=token_data,
+        data={
+            "client_id": st.secrets["DISCORD_CLIENT_ID"],
+            "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
+        },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
 
     if token_resp.status_code != 200:
+        st.experimental_set_query_params()
         st.error("Token exchange falló:\n" + token_resp.text)
         st.stop()
 
@@ -203,7 +203,8 @@ def authenticate_discord():
     user_id = user["id"]
 
     member = requests.get(
-        f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}/members/{user_id}",
+        f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}"
+        f"/members/{user_id}",
         headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
     ).json()
 
