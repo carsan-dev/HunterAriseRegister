@@ -227,13 +227,15 @@ def member_view_authenticated():
     paid_sx = st.number_input("Cantidad pagada (sx)", value=1.0, step=0.1)
     rate_sx = st.number_input("SX por día", value=1.0, step=0.1)
 
+    paid_qi = paid_sx * SUFFIX_MAP["sx"]
+    rate_qi = rate_sx * SUFFIX_MAP["sx"]
+    st.write(f"Total pagado: {format_quantity(paid_qi)}")
+    st.write(f"Coste diario: {format_quantity(rate_qi)}")
+
     captura = st.file_uploader("Captura")
 
     if st.button("Registrar pago"):
-        paid_qi = paid_sx * SUFFIX_MAP["sx"]
-        rate_qi = rate_sx * SUFFIX_MAP["sx"]
-        dias = int(paid_qi / rate_qi)
-
+        dias = int(paid_qi / rate_qi) if rate_qi > 0 else 0
         if dias < 1:
             st.error("La cantidad pagada es insuficiente para generar al menos 1 día.")
         elif not captura:
@@ -249,14 +251,20 @@ def member_view_authenticated():
         exp = compute_expiry(user_payments)
         dias_rest = max((exp.date() - fecha).days, 0)
         dias_atra = max((fecha - exp.date()).days, 0)
-        st.metric("Días restantes", dias_rest)
+
+        if dias_rest > 0:
+            st.metric("Días restantes", dias_rest)
+        elif dias_atra == 0:
+            st.metric("Días restantes", "Vas al día")
+        else:
+            st.metric("Días restantes", "Llevas retraso de donaciones")
+
         st.metric("Días de atraso", dias_atra)
 
         df = user_payments.copy()
         df["Cantidad"] = df["Cantidad"].apply(format_quantity)
         st.subheader("Historial de pagos")
         st.table(df[["Fecha", "Dias", "Cantidad"]])
-
 
 
 def show_notifications(pagos_df, config):
