@@ -232,11 +232,12 @@ def authenticate_discord():
     st.session_state.setdefault("step", 1)
     if st.session_state["step"] == 1:
         start_challenge()
-    if st.session_state["step"] == 2:
+        st.stop()
+    elif st.session_state["step"] == 2:
         result = verify_challenge()
         if result:
             return result
-    st.stop()
+        st.stop()
 
 
 def render_payment_form(user_id, nick, config):
