@@ -239,7 +239,7 @@ def render_payment_form(user_id, nick):
             dias_disp = (
                 int(dias_calc) if float(dias_calc).is_integer() else round(dias_calc, 2)
             )
-            st.write(f"Corresponde a {dias_disp} días")
+            st.info(f"Corresponde a {dias_disp} días")
     except ValueError:
         pass
     captura = st.file_uploader("Captura")
