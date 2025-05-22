@@ -5,7 +5,8 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
-from requests_oauthlib import OAuth2Session
+import random
+import string
 import requests
 import re
 import uuid
@@ -163,63 +164,54 @@ def authenticate_discord():
     if "user_id" in st.session_state and "nick" in st.session_state:
         return st.session_state["user_id"], st.session_state["nick"]
 
-    client_id = st.secrets["DISCORD_CLIENT_ID"]
-    client_secret = st.secrets["DISCORD_CLIENT_SECRET"]
-    redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
-    scope = ["identify"]
+    if "challenge" not in st.session_state:
+        st.session_state["step"] = 1
 
-    if "oauth_state" not in st.session_state:
-        oauth = OAuth2Session(client_id, redirect_uri=redirect_uri, scope=scope)
-        auth_url, state = oauth.authorization_url(
-            "https://discord.com/api/oauth2/authorize"
-        )
-        st.session_state["oauth_state"] = state
-        st.session_state["oauth_client"] = oauth
-        st.markdown(f"[🔐 Iniciar sesión con Discord]({auth_url})")
-        st.stop()
+    if st.session_state.get("step") == 1:
+        user_id = st.text_input("🔑 Escribe tu Discord user ID")
+        if user_id:
+            code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            st.session_state["challenge"] = code
+            st.session_state["candidate_id"] = user_id
 
-    params = st.query_params
-    code = params.get("code", [None])[0]
-    state = params.get("state", [None])[0]
+            dm = requests.post(
+                "https://discord.com/api/v10/users/@me/channels",
+                headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
+                json={"recipient_id": user_id},
+            ).json()
+            channel_id = dm.get("id")
+            requests.post(
+                f"https://discord.com/api/v10/channels/{channel_id}/messages",
+                headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
+                json={"content": f"Tu código de autenticación es: **{code}**"},
+            )
 
-    if not code or state != st.session_state["oauth_state"]:
-        st.session_state.pop("oauth_state", None)
-        st.error("Fallo en el estado de OAuth2. Intenta de nuevo.")
-        st.stop()
+            st.session_state["step"] = 2
+            st.experimental_rerun()
 
-    oauth = OAuth2Session(
-        client_id,
-        redirect_uri=redirect_uri,
-        state=state,
-    )
-    token = oauth.fetch_token(
-        "https://discord.com/api/oauth2/token",
-        client_secret=client_secret,
-        code=code,
-    )
+    if st.session_state.get("step") == 2:
+        entry = st.text_input("📩 Escribe el código que recibiste por DM")
+        if entry:
+            if entry == st.session_state.get("challenge"):
+                user_id = st.session_state["candidate_id"]
+                member = requests.get(
+                    f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}"
+                    f"/members/{user_id}",
+                    headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
+                ).json()
+                if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
+                    st.error("No tienes el rol requerido.")
+                    st.stop()
 
-    st.session_state.pop("oauth_state", None)
-    st.session_state.pop("oauth_client", None)
-    st.query_params = {}
+                nick = member.get("nick") or member["user"]["username"]
+                st.session_state["user_id"] = user_id
+                st.session_state["nick"] = nick
+                return user_id, nick
+            else:
+                st.error("Código incorrecto. Reintenta.")
+                st.stop()
 
-    user = oauth.get("https://discord.com/api/users/@me").json()
-    user_id = user["id"]
-
-    member = requests.get(
-        f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}"
-        f"/members/{user_id}",
-        headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
-    ).json()
-
-    if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
-        st.stop()
-
-    nick = member.get("nick") or user["username"]
-
-    st.session_state["user_id"] = user_id
-    st.session_state["nick"] = nick
-
-    return user_id, nick
+    st.stop()
 
 
 def member_view_authenticated():
