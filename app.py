@@ -189,12 +189,12 @@ def authenticate_discord():
     )
 
     if token_resp.status_code != 200:
-        st.experimental_set_query_params()
+        st.query_params = {}
         st.error("Token exchange falló:\n" + token_resp.text)
         st.stop()
 
     access_token = token_resp.json()["access_token"]
-    st.experimental_set_query_params()
+    st.query_params = {}
 
     user = requests.get(
         "https://discord.com/api/users/@me",
