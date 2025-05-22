@@ -195,6 +195,7 @@ def member_view(config):
 
 
 def show_notifications(pagos_df, config):
+    id_to_nick = dict(zip(config["user_id"], config["nick"]))
     if "last_count" not in st.session_state:
         st.session_state["last_count"] = len(pagos_df)
         st.session_state["pending_notifications"] = []
@@ -204,7 +205,7 @@ def show_notifications(pagos_df, config):
         for i in range(st.session_state["last_count"], new_count):
             p = ps.iloc[i]
             ph = st.sidebar.empty()
-            nick = config.loc[config["user_id"] == p["Miembro"], "nick"].iat[0]
+            nick = id_to_nick.get(p["Miembro"], p["Miembro"])
             st.session_state["pending_notifications"].append(
                 {
                     "time": datetime.now(tz=ESP),
@@ -229,11 +230,9 @@ def show_notifications(pagos_df, config):
 
 
 def admin_dashboard(pagos_df, config):
-    st.header("🔑 Panel de Administración")
     today = datetime.now(tz=ESP).date()
     rows = []
-    for uid in config["user_id"]:
-        nick = config.loc[config["user_id"] == uid, "nick"].iat[0]
+    for uid, nick in zip(config["user_id"], config["nick"]):
         grp = pagos_df[pagos_df["Miembro"] == uid]
         if grp.empty:
             rows.append(
@@ -274,25 +273,12 @@ def show_historial(config):
     df_edit = df.copy()
     df_edit["Cantidad_fmt"] = df_edit["Cantidad"].apply(format_quantity)
     df_edit["Eliminar"] = False
-    df_edit["nick"] = df_edit["Miembro"].map(
-        lambda x: config.loc[config["user_id"] == x, "nick"].iat[0]
-    )
+    id_to_nick = dict(zip(config["user_id"], config["nick"]))
+    df_edit["nick"] = df_edit["Miembro"].map(id_to_nick).fillna(df_edit["Miembro"])
     edited = st.data_editor(
-        df_edit[
-            [
-                "id",
-                "Fecha",
-                "Miembro",
-                "nick",
-                "Dias",
-                "Cantidad_fmt",
-                "Captura",
-                "Eliminar",
-            ]
-        ],
+        df_edit[["id", "nick", "Fecha", "Dias", "Cantidad_fmt", "Captura", "Eliminar"]],
         column_config={
             "id": {"hidden": True},
-            "Miembro": {"hidden": True},
             "nick": {"title": "Miembro"},
             "Cantidad_fmt": {"title": "Cantidad"},
             "Captura": {"disabled": True},
@@ -328,12 +314,13 @@ def show_capturas(config):
     if st.button(btn, key="cap_toggle"):
         st.session_state["show_all"] = not st.session_state["show_all"]
     display_df = df if st.session_state["show_all"] else df.head(5)
+    id_to_nick = dict(zip(config["user_id"], config["nick"]))
     for _, r in display_df.iterrows():
         if not r["Captura"]:
             continue
         url = get_signed_url(r["Captura"])
         c1, c2 = st.columns([1, 3])
-        nick = config.loc[config["user_id"] == r["Miembro"], "nick"].iat[0]
+        nick = id_to_nick.get(r["Miembro"], r["Miembro"])
         with c1:
             st.image(url, width=100)
         with c2:
