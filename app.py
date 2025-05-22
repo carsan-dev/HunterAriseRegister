@@ -166,6 +166,7 @@ def authenticate_discord():
     client_id = st.secrets["DISCORD_CLIENT_ID"]
     client_secret = st.secrets["DISCORD_CLIENT_SECRET"]
     redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
+    ru = quote_plus(redirect_uri)
     bot_token = st.secrets["DISCORD_BOT_TOKEN"]
     guild_id = st.secrets["DISCORD_GUILD_ID"]
     role_id = st.secrets["DISCORD_ROLE_ID"]
@@ -174,7 +175,7 @@ def authenticate_discord():
         url = (
             "https://discord.com/api/oauth2/authorize"
             f"?client_id={client_id}"
-            f"&redirect_uri={redirect_uri}"
+            f"&redirect_uri={ru}"
             "&response_type=code"
             "&scope=identify%20guilds.members.read"
         )
