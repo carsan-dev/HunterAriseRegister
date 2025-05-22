@@ -1,3 +1,5 @@
+import re
+import uuid
 import streamlit as st
 import pandas as pd
 import os
@@ -136,20 +138,34 @@ def compute_expiry(group):
 
 
 def upload_capture_to_storage(fecha, miembro, captura):
-    import uuid
-
     ext = os.path.splitext(captura.name)[1] if hasattr(captura, "name") else ".png"
-    filename = f"{fecha.strftime('%Y%m%d')}_{miembro}_{uuid.uuid4().hex}{ext}"
+
+    raw = miembro
+    ascii_nombre = raw.encode("ascii", "ignore").decode()
+    safe_nombre = re.sub(r"[^A-Za-z0-9_-]", "_", ascii_nombre)
+    safe_nombre = safe_nombre[:50]
+
+    uid = uuid.uuid4().hex
+
+    fecha_str = fecha.strftime("%Y%m%d")
+    if safe_nombre:
+        filename = f"{fecha_str}_{safe_nombre}_{uid}{ext}"
+    else:
+        filename = f"{fecha_str}_{uid}{ext}"
+
     tmp_dir = "/tmp/supabase_uploads"
     os.makedirs(tmp_dir, exist_ok=True)
     tmp_path = os.path.join(tmp_dir, filename)
     with open(tmp_path, "wb") as f:
         f.write(captura.getbuffer())
+
     supabase_admin.storage.from_(BUCKET).upload(filename, tmp_path)
+
     try:
         os.remove(tmp_path)
     except OSError:
         pass
+
     return filename
 
 
