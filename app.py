@@ -242,7 +242,6 @@ def member_view_authenticated():
             filename = upload_capture_to_storage(fecha, user_id, captura)
             save_payment(fecha, user_id, dias, paid_qi, filename)
             st.success("Pago registrado.")
-            st.experimental_rerun()
 
     if user_payments.empty:
         st.info("Aún no tienes pagos registrados.")
@@ -257,6 +256,7 @@ def member_view_authenticated():
         df["Cantidad"] = df["Cantidad"].apply(format_quantity)
         st.subheader("Historial de pagos")
         st.table(df[["Fecha", "Dias", "Cantidad"]])
+
 
 
 def show_notifications(pagos_df, config):
