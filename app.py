@@ -5,7 +5,6 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
-from urllib.parse import quote_plus
 import requests
 import re
 import uuid
@@ -162,42 +161,33 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 def authenticate_discord():
     params = st.query_params
-    client_id = st.secrets["DISCORD_CLIENT_ID"]
-    client_secret = st.secrets["DISCORD_CLIENT_SECRET"]
-    redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
-    bot_token = st.secrets["DISCORD_BOT_TOKEN"]
-    guild_id = st.secrets["DISCORD_GUILD_ID"]
-    role_id = st.secrets["DISCORD_ROLE_ID"]
     if "code" not in params:
-        ru = quote_plus(redirect_uri)
+        client_id = st.secrets["DISCORD_CLIENT_ID"]
+        redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
         url = (
             "https://discord.com/api/oauth2/authorize"
             f"?client_id={client_id}"
-            f"&redirect_uri={ru}"
+            f"&redirect_uri={redirect_uri}"
             "&response_type=code"
-            "&scope=identify%20guilds.members.read"
+            "&scope=identify"
         )
         st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
         st.stop()
     code = params["code"][0]
     data = {
-        "client_id": client_id,
-        "client_secret": client_secret,
+        "client_id": st.secrets["DISCORD_CLIENT_ID"],
+        "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": redirect_uri,
+        "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
     }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     token_resp = requests.post(
-        "https://discord.com/api/oauth2/token", data=data, headers=headers
+        "https://discord.com/api/oauth2/token",
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    try:
-        st.write("Código HTTP:", token_resp.status_code)
-        st.write("Respuesta Discord:", token_resp.json())
-        token_resp.raise_for_status()
-    except Exception:
-        st.error(token_resp.text)
-        st.stop()
+    token_resp.raise_for_status()
+    st.experimental_set_query_params()
     access_token = token_resp.json()["access_token"]
     user_resp = requests.get(
         "https://discord.com/api/users/@me",
@@ -207,13 +197,13 @@ def authenticate_discord():
     user = user_resp.json()
     user_id = user["id"]
     member_resp = requests.get(
-        f"https://discord.com/api/v10/guilds/{guild_id}/members/{user_id}",
-        headers={"Authorization": f"Bot {bot_token}"},
+        f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}/members/{user_id}",
+        headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
     )
     if member_resp.status_code != 200:
         st.stop()
     member = member_resp.json()
-    if role_id not in member.get("roles", []):
+    if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
         st.stop()
     nick = member.get("nick") or user["username"]
     return user_id, nick
