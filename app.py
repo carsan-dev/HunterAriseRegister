@@ -4,8 +4,8 @@ import os
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
-from supabase import create_client, Client
-from io import BytesIO
+from supabase import create_client
+import requests
 
 CONFIG_FILE = "config.csv"
 ESP = ZoneInfo("Europe/Madrid")
@@ -45,11 +45,32 @@ def format_quantity(units):
 
 
 def load_config():
-    df = pd.read_csv(CONFIG_FILE)
-    first = df.columns[0]
-    if first.lower() != "miembro":
-        df = df.rename(columns={first: "Miembro"})
-    return df
+    """
+    Obtiene todos los miembros del GUILD_ID que tengan el rol ROLE_ID
+    y los devuelve en un DataFrame con columna 'Miembro'.
+    """
+    token = st.secrets["DISCORD_BOT_TOKEN"]
+    guild_id = st.secrets["DISCORD_GUILD_ID"]
+    role_id = st.secrets["DISCORD_ROLE_ID"]
+    url = f"https://discord.com/api/v10/guilds/{guild_id}/members"
+    headers = {"Authorization": f"Bot {token}"}
+    params = {"limit": 1000}
+    miembros = []
+
+    while True:
+        resp = requests.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        for m in data:
+            if role_id in m.get("roles", []):
+                u = m["user"]
+                nick = m.get("nick") or u["username"]
+                miembros.append(nick)
+        if len(data) < 1000:
+            break
+        params["after"] = data[-1]["user"]["id"]
+
+    return pd.DataFrame({"Miembro": miembros})
 
 
 def load_payments():
@@ -116,7 +137,8 @@ def compute_expiry(group):
 
 def upload_capture_to_storage(fecha, miembro, captura):
     import uuid
-    ext = os.path.splitext(captura.name)[1] if hasattr(captura, 'name') else ".png"
+
+    ext = os.path.splitext(captura.name)[1] if hasattr(captura, "name") else ".png"
     filename = f"{fecha.strftime('%Y%m%d')}_{miembro}_{uuid.uuid4().hex}{ext}"
     tmp_dir = "/tmp/supabase_uploads"
     os.makedirs(tmp_dir, exist_ok=True)
