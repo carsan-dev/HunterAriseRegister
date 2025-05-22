@@ -222,9 +222,12 @@ def authenticate_discord():
     st.stop()
 
 
-def render_payment_form(user_id, nick):
+def render_payment_form(user_id, nick, config):
     st.write(f"👋 Hola **{nick}**")
     fecha = st.date_input("Fecha de pago", datetime.now(tz=ESP).date())
+    opciones = ["Yo"] + sorted(config["nick"].tolist())
+    seleccion = st.multiselect("Pagar donación para", opciones, default=["Yo"])
+    id_map = {n: u for u, n in zip(config["user_id"], config["nick"])}
     paid_str = st.text_input(
         "Cantidad pagada", value="1sx", help="Ejemplo: 1sx, 1.5sp, 500qi"
     )
@@ -244,7 +247,9 @@ def render_payment_form(user_id, nick):
         pass
     captura = st.file_uploader("Captura")
     if st.button("Registrar pago"):
-        handle_new_payment(fecha, user_id, paid_str, rate_str, captura)
+        for destino in seleccion:
+            dest_id = user_id if destino == "Yo" else id_map[destino]
+            handle_new_payment(fecha, dest_id, paid_str, rate_str, captura)
 
 
 def handle_new_payment(fecha, user_id, paid_str, rate_str, captura):
@@ -297,12 +302,12 @@ def render_payment_history(user_payments):
     st.table(df[["Fecha", "Dias", "Cantidad"]])
 
 
-def member_view_authenticated():
+def member_view_authenticated(config):
     user_id, nick = authenticate_discord()
     pagos_df = load_payments()
     user_payments = pagos_df[pagos_df["Miembro"] == user_id]
     today = datetime.now(tz=ESP).date()
-    render_payment_form(user_id, nick)
+    render_payment_form(user_id, nick, config)
     compute_and_show_metrics(user_payments, today)
     render_payment_history(user_payments)
 
@@ -478,7 +483,7 @@ def main():
     )
     st.sidebar.button("🔄 Refrescar datos", key="refresh")
     if role == "Miembro":
-        member_view_authenticated()
+        member_view_authenticated(config)
         return
     if st.session_state["admin_pw"] != st.secrets.get("admin_password", ""):
         st.error("Acceso denegado")
