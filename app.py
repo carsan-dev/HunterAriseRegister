@@ -161,13 +161,15 @@ def save_payment(fecha, miembro, dias, cantidad, captura):
 
 
 def start_challenge():
-    user_id = st.text_input("🔑 Escribe tu Discord user ID")
+    st.session_state.setdefault("step", 1)
+    user_id = st.text_input("🔑 Escribe tu Discord user ID", key="discord_user_input")
     if user_id:
         code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
         st.session_state["challenge"] = code
         st.session_state["candidate_id"] = user_id
         st.session_state["step"] = 2
         send_challenge_dm(user_id, code)
+        st.session_state["discord_user_input"] = ""
         st.stop()
 
 
@@ -178,19 +180,24 @@ def send_challenge_dm(user_id, code):
         headers={"Authorization": f"Bot {token}"},
         json={"recipient_id": user_id},
     ).json()
-    channel_id = dm.get("id")
-    requests.post(
+    channel_id = dm["id"]
+    msg = requests.post(
         f"https://discord.com/api/v10/channels/{channel_id}/messages",
         headers={"Authorization": f"Bot {token}"},
         json={"content": f"Tu código de autenticación es: **{code}**"},
-    )
+    ).json()
+    st.session_state["challenge_channel_id"] = channel_id
+    st.session_state["challenge_message_id"] = msg["id"]
 
 
 def verify_challenge():
-    entry = st.text_input("📩 Escribe el código que recibiste por DM")
+    entry = st.text_input(
+        "📩 Escribe el código que recibiste por DM", key="challenge_input"
+    )
     if not entry:
         return
     if entry != st.session_state["challenge"]:
+        st.session_state["challenge_input"] = ""
         st.error("Código incorrecto. Reintenta.")
         st.stop()
     token = st.secrets["DISCORD_BOT_TOKEN"]
@@ -201,8 +208,17 @@ def verify_challenge():
         headers={"Authorization": f"Bot {token}"},
     ).json()
     if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
+        st.session_state["challenge_input"] = ""
         st.error("No tienes el rol requerido.")
         st.stop()
+    channel_id = st.session_state.get("challenge_channel_id")
+    message_id = st.session_state.get("challenge_message_id")
+    if channel_id and message_id:
+        requests.delete(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}",
+            headers={"Authorization": f"Bot {token}"},
+        )
+    st.session_state["challenge_input"] = ""
     nick = member.get("nick") or member["user"]["username"]
     st.session_state["user_id"] = uid
     st.session_state["nick"] = nick
