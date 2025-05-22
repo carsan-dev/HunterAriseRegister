@@ -172,6 +172,7 @@ def start_challenge():
         st.session_state["candidate_id"] = user_id
         st.session_state["step"] = 2
         send_challenge_dm(user_id, code)
+        st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
 
 
 def send_challenge_dm(user_id, code):
