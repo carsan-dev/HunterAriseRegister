@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
-from streamlit_autorefresh import st_autorefresh
-from supabase import create_client
 import random
 import string
 import requests
 import re
 import uuid
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+from streamlit_autorefresh import st_autorefresh
+from supabase import create_client
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -135,7 +135,8 @@ def load_payments():
     data = res.data or []
     df = pd.DataFrame(
         data, columns=["id", "fecha", "miembro", "dias", "cantidad", "captura"]
-    ).rename(
+    )
+    df = df.rename(
         columns={
             "fecha": "Fecha",
             "miembro": "Miembro",
@@ -193,10 +194,10 @@ def authenticate_discord():
         entry = st.text_input("📩 Escribe el código que recibiste por DM")
         if entry:
             if entry == st.session_state["challenge"]:
-                user_id = st.session_state["candidate_id"]
+                uid = st.session_state["candidate_id"]
                 member = requests.get(
                     f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}"
-                    f"/members/{user_id}",
+                    f"/members/{uid}",
                     headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
                 ).json()
                 if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
@@ -204,9 +205,9 @@ def authenticate_discord():
                     st.stop()
 
                 nick = member.get("nick") or member["user"]["username"]
-                st.session_state["user_id"] = user_id
+                st.session_state["user_id"] = uid
                 st.session_state["nick"] = nick
-                return user_id, nick
+                return uid, nick
             else:
                 st.error("Código incorrecto. Reintenta.")
                 st.stop()
@@ -219,13 +220,26 @@ def member_view_authenticated():
     st.write(f"👋 Hola **{nick}**")
     pagos_df = load_payments()
     user_payments = pagos_df[pagos_df["Miembro"] == user_id]
-    today = datetime.now(tz=ESP).date()
+    fecha = st.date_input("Fecha de pago", datetime.now(tz=ESP).date())
+    dias = st.number_input("Días", min_value=1, step=1)
+    cantidad_str = st.text_input("Cantidad (ej. 2qi, 1.5sx)")
+    captura = st.file_uploader("Captura")
+    if st.button("Registrar pago"):
+        if not (cantidad_str and captura):
+            st.error("Cantidad y captura son obligatorios.")
+        else:
+            cantidad = parse_quantity(cantidad_str)
+            filename = upload_capture_to_storage(fecha, user_id, captura)
+            save_payment(fecha, user_id, dias, cantidad, filename)
+            st.success("Pago registrado.")
+            st.experimental_rerun()
+
     if user_payments.empty:
         st.info("Aún no tienes pagos registrados.")
     else:
         exp = compute_expiry(user_payments)
-        dias_rest = max((exp.date() - today).days, 0)
-        dias_atra = max((today - exp.date()).days, 0)
+        dias_rest = max((exp.date() - fecha).days, 0)
+        dias_atra = max((fecha - exp.date()).days, 0)
         st.metric("Días restantes", dias_rest)
         st.metric("Días de atraso", dias_atra)
         df = user_payments.copy()
@@ -284,9 +298,13 @@ def admin_dashboard(pagos_df, config):
             )
         else:
             exp = compute_expiry(grp)
-            left = max((exp.date() - today).days, 0)
-            over = max((today - exp.date()).days, 0)
-            rows.append({"Miembro": nick, "Días restantes": left, "Días atraso": over})
+            rows.append(
+                {
+                    "Miembro": nick,
+                    "Días restantes": max((exp.date() - today).days, 0),
+                    "Días atraso": max((today - exp.date()).days, 0),
+                }
+            )
     df = pd.DataFrame(rows)
     st.subheader("📋 Estado de miembros")
     st.table(df)
@@ -300,10 +318,9 @@ def show_historial(config):
     if pagos_df.empty:
         lo = hi = date.today()
     else:
-        lo = pagos_df["Fecha"].min()
-        hi = pagos_df["Fecha"].max()
+        lo, hi = pagos_df["Fecha"].min(), pagos_df["Fecha"].max()
     dates = st.date_input("Rango de fechas", [lo, hi], key="hist_dates")
-    if not isinstance(dates, (list, tuple)) or len(dates) != 2:
+    if len(dates) != 2:
         st.error("Seleccione rango")
         return
     df = pagos_df[(pagos_df["Fecha"] >= dates[0]) & (pagos_df["Fecha"] <= dates[1])]
@@ -354,16 +371,20 @@ def show_capturas(config):
     st.subheader("📸 Capturas de pagos")
     members = ["Todos"] + sorted(config["nick"].tolist())
     sel = st.selectbox("Mostrar capturas de:", members, key="cap_member")
-    if sel != "Todos":
-        uid = config.loc[config["nick"] == sel, "user_id"].iat[0]
-        df = pagos_df[pagos_df["Miembro"] == uid]
-    else:
-        df = pagos_df
+    df = (
+        pagos_df
+        if sel == "Todos"
+        else pagos_df[
+            pagos_df["Miembro"] == config.loc[config["nick"] == sel, "user_id"].iat[0]
+        ]
+    )
     df = df.sort_values("Fecha", ascending=False)
     if "show_all" not in st.session_state:
         st.session_state["show_all"] = False
-    btn = "Mostrar todas" if not st.session_state["show_all"] else "Ocultar"
-    if st.button(btn, key="cap_toggle"):
+    if st.button(
+        "Mostrar todas" if not st.session_state["show_all"] else "Ocultar",
+        key="cap_toggle",
+    ):
         st.session_state["show_all"] = not st.session_state["show_all"]
     display_df = df if st.session_state["show_all"] else df.head(5)
     id_to_nick = dict(zip(config["user_id"], config["nick"]))
@@ -396,12 +417,15 @@ def main():
         key="admin_pw",
     )
     st.sidebar.button("🔄 Refrescar datos", key="refresh")
+
     if role == "Miembro":
         member_view_authenticated()
         return
+
     if st.session_state["admin_pw"] != st.secrets.get("admin_password", ""):
         st.error("Acceso denegado")
         return
+
     st.sidebar.success("👑 Acceso admin concedido")
     st_autorefresh(interval=30000, key="datarefresh")
     pagos_df = load_payments()
