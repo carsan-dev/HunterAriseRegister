@@ -10,7 +10,6 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
-from urllib.parse import urlencode
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -76,7 +75,8 @@ def delete_all_and_insert(df_full):
 
 def upload_capture_to_storage(fecha, miembro, captura):
     ext = os.path.splitext(captura.name)[1] if hasattr(captura, "name") else ".png"
-    ascii_nombre = miembro.encode("ascii", "ignore").decode()
+    raw = miembro
+    ascii_nombre = raw.encode("ascii", "ignore").decode()
     safe_nombre = re.sub(r"[^A-Za-z0-9_-]", "_", ascii_nombre)[:50]
     uid = uuid.uuid4().hex
     fecha_str = fecha.strftime("%Y%m%d")
@@ -149,105 +149,82 @@ def load_payments():
     return df
 
 
-def save_payment(fecha, miembro, dias, cantidad, captura_path):
+def save_payment(fecha, miembro, dias, cantidad, captura):
     supabase_admin.from_("pagos").insert(
         {
             "fecha": fecha.isoformat(),
             "miembro": miembro,
             "dias": dias,
             "cantidad": cantidad,
-            "captura": captura_path,
+            "captura": captura,
         }
     ).execute()
 
 
-def _get_authenticated_user():
-    if "user_id" in st.session_state and "nick" in st.session_state:
-        return st.session_state["user_id"], st.session_state["nick"]
-    return None
+def start_challenge():
+    user_id = st.text_input("🔑 Escribe tu Discord user ID")
+    if user_id:
+        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        st.session_state["challenge"] = code
+        st.session_state["candidate_id"] = user_id
+        st.session_state["step"] = 2
+        send_challenge_dm(user_id, code)
+        st.stop()
 
 
-def _prompt_discord_login():
-    params = {
-        "client_id": st.secrets["DISCORD_CLIENT_ID"],
-        "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
-        "response_type": "code",
-        "scope": "identify",
-    }
-    url = "https://discord.com/api/oauth2/authorize?" + urlencode(params)
-    st.markdown(f"[🔐 Iniciar sesión con Discord]({url})")
-
-
-def _exchange_code_for_token(code):
-    data = {
-        "client_id": st.secrets["DISCORD_CLIENT_ID"],
-        "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
-    }
-    resp = requests.post(
-        "https://discord.com/api/oauth2/token",
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+def send_challenge_dm(user_id, code):
+    token = st.secrets["DISCORD_BOT_TOKEN"]
+    dm = requests.post(
+        "https://discord.com/api/v10/users/@me/channels",
+        headers={"Authorization": f"Bot {token}"},
+        json={"recipient_id": user_id},
+    ).json()
+    channel_id = dm.get("id")
+    requests.post(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        headers={"Authorization": f"Bot {token}"},
+        json={"content": f"Tu código de autenticación es: **{code}**"},
     )
-    if resp.status_code != 200:
-        st.query_params = {}
-        st.error("Token exchange falló:\n" + resp.text)
-        return None
-    st.query_params = {}
-    return resp.json().get("access_token")
 
 
-def _fetch_discord_user(token):
-    return requests.get(
-        "https://discord.com/api/users/@me",
-        headers={"Authorization": f"Bearer {token}"},
+def verify_challenge():
+    entry = st.text_input("📩 Escribe el código que recibiste por DM")
+    if not entry:
+        return
+    if entry != st.session_state["challenge"]:
+        st.error("Código incorrecto. Reintenta.")
+        st.stop()
+    token = st.secrets["DISCORD_BOT_TOKEN"]
+    guild_id = st.secrets["DISCORD_GUILD_ID"]
+    uid = st.session_state["candidate_id"]
+    member = requests.get(
+        f"https://discord.com/api/v10/guilds/{guild_id}/members/{uid}",
+        headers={"Authorization": f"Bot {token}"},
     ).json()
-
-
-def _fetch_guild_member(user_id):
-    return requests.get(
-        f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}/members/{user_id}",
-        headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
-    ).json()
-
-
-def _member_has_role(member):
-    return st.secrets["DISCORD_ROLE_ID"] in member.get("roles", [])
-
-
-def _finalize_auth(user, member):
-    nick = member.get("nick") or user["username"]
-    st.session_state["user_id"] = user["id"]
+    if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
+        st.error("No tienes el rol requerido.")
+        st.stop()
+    nick = member.get("nick") or member["user"]["username"]
+    st.session_state["user_id"] = uid
     st.session_state["nick"] = nick
-    return user["id"], nick
+    return uid, nick
 
 
 def authenticate_discord():
-    existing = _get_authenticated_user()
-    if existing:
-        return existing
-    code = st.query_params.get("code", [None])[0]
-    if not code:
-        _prompt_discord_login()
-        st.stop()
-    access_token = _exchange_code_for_token(code)
-    if not access_token:
-        st.stop()
-    user = _fetch_discord_user(access_token)
-    member = _fetch_guild_member(user["id"])
-    if not _member_has_role(member):
-        st.stop()
-    return _finalize_auth(user, member)
+    if "user_id" in st.session_state and "nick" in st.session_state:
+        return st.session_state["user_id"], st.session_state["nick"]
+    st.session_state.setdefault("step", 1)
+    if st.session_state["step"] == 1:
+        start_challenge()
+    if st.session_state["step"] == 2:
+        result = verify_challenge()
+        if result:
+            return result
+    st.stop()
 
 
-def load_payments_for(user_id):
-    df = load_payments()
-    return df[df["Miembro"] == user_id]
-
-
-def _render_payment_form(user_id):
+def render_payment_form(user_id, nick):
+    st.write(f"👋 Hola **{nick}**")
     fecha = st.date_input("Fecha de pago", datetime.now(tz=ESP).date())
     paid_str = st.text_input(
         "Cantidad pagada", value="1sx", help="Ejemplo: 1sx, 1.5sp, 500qi"
@@ -256,8 +233,11 @@ def _render_payment_form(user_id):
         "SX por día", value="1sx", help="Ejemplo: 1sx, 1.5sp, 500qi"
     )
     captura = st.file_uploader("Captura")
-    if not st.button("Registrar pago"):
-        return
+    if st.button("Registrar pago"):
+        handle_new_payment(fecha, user_id, paid_str, rate_str, captura)
+
+
+def handle_new_payment(fecha, user_id, paid_str, rate_str, captura):
     paid_qi = parse_quantity(paid_str)
     rate_qi = parse_quantity(rate_str)
     if rate_qi <= 0:
@@ -266,41 +246,36 @@ def _render_payment_form(user_id):
     dias = round(paid_qi / rate_qi, 1)
     if dias < 1:
         st.error("La cantidad pagada es insuficiente para generar al menos 1 día.")
-        return
-    if not captura:
+    elif not captura:
         st.error("Debes subir una captura.")
-        return
-    filename = upload_capture_to_storage(fecha, user_id, captura)
-    save_payment(fecha, user_id, dias, paid_qi, filename)
-    st.success("Pago registrado.")
+    else:
+        filename = upload_capture_to_storage(fecha, user_id, captura)
+        save_payment(fecha, user_id, dias, paid_qi, filename)
+        st.success("Pago registrado.")
 
 
-def _compute_payment_stats(payments):
-    total_qi = payments["Cantidad"].sum()
-    exp = compute_expiry(payments)
-    today = datetime.now(tz=ESP).date()
-    days_left = max((exp.date() - today).days, 0)
-    days_over = max((today - exp.date()).days, 0)
-    return total_qi, days_left, days_over
-
-
-def _left_label(days_left, days_over):
-    if days_left > 0:
-        return days_left
-    if days_over > 0:
-        return "Llevas retraso de donaciones"
-    return "Vas al día"
-
-
-def _render_metrics(total_qi, days_left, days_over):
+def compute_and_show_metrics(user_payments, today):
+    total_paid_qi = user_payments["Cantidad"].sum()
+    exp = compute_expiry(user_payments)
+    dias_rest = max((exp.date() - today).days, 0)
+    dias_atra = max((today - exp.date()).days, 0)
+    if dias_rest > 0:
+        rest_display = dias_rest
+    elif dias_atra == 0:
+        rest_display = "Vas al día"
+    else:
+        rest_display = "Llevas retraso de donaciones"
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total pagado", format_quantity(total_qi))
-    c2.metric("Días restantes", _left_label(days_left, days_over))
-    c3.metric("Días de atraso", days_over)
+    c1.metric("Total pagado", format_quantity(total_paid_qi))
+    c2.metric("Días restantes", rest_display)
+    c3.metric("Días de atraso", dias_atra)
 
 
-def _render_history_table(payments):
-    df = payments.copy()
+def render_payment_history(user_payments):
+    if user_payments.empty:
+        st.info("Aún no tienes pagos registrados.")
+        return
+    df = user_payments.copy()
     df["Cantidad"] = df["Cantidad"].apply(format_quantity)
     df["Dias"] = df["Dias"].apply(
         lambda d: int(d) if float(d).is_integer() else round(d, 1)
@@ -311,15 +286,12 @@ def _render_history_table(payments):
 
 def member_view_authenticated():
     user_id, nick = authenticate_discord()
-    st.write(f"👋 Hola **{nick}**")
-    payments = load_payments_for(user_id)
-    _render_payment_form(user_id)
-    if payments.empty:
-        st.info("Aún no tienes pagos registrados.")
-        return
-    total_qi, days_left, days_over = _compute_payment_stats(payments)
-    _render_metrics(total_qi, days_left, days_over)
-    _render_history_table(payments)
+    pagos_df = load_payments()
+    user_payments = pagos_df[pagos_df["Miembro"] == user_id]
+    today = datetime.now(tz=ESP).date()
+    render_payment_form(user_id, nick)
+    compute_and_show_metrics(user_payments, today)
+    render_payment_history(user_payments)
 
 
 def show_notifications(pagos_df, config):
