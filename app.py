@@ -8,6 +8,7 @@ from supabase import create_client
 import requests
 import re
 import uuid
+from urllib.parse import quote
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -163,11 +164,12 @@ def authenticate_discord():
     params = st.query_params
     if "code" not in params:
         client_id = st.secrets["DISCORD_CLIENT_ID"]
-        redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
+        redirect = st.secrets["DISCORD_REDIRECT_URI"]
+        redirect_enc = quote(redirect, safe="")
         url = (
             "https://discord.com/api/oauth2/authorize"
             f"?client_id={client_id}"
-            f"&redirect_uri={redirect_uri}"
+            f"&redirect_uri={redirect_enc}"
             "&response_type=code"
             "&scope=identify"
         )
@@ -189,20 +191,15 @@ def authenticate_discord():
     token_resp.raise_for_status()
     st.experimental_set_query_params()
     access_token = token_resp.json()["access_token"]
-    user_resp = requests.get(
+    user = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"},
-    )
-    user_resp.raise_for_status()
-    user = user_resp.json()
+    ).json()
     user_id = user["id"]
-    member_resp = requests.get(
+    member = requests.get(
         f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}/members/{user_id}",
         headers={"Authorization": f"Bot {st.secrets['DISCORD_BOT_TOKEN']}"},
-    )
-    if member_resp.status_code != 200:
-        st.stop()
-    member = member_resp.json()
+    ).json()
     if st.secrets["DISCORD_ROLE_ID"] not in member.get("roles", []):
         st.stop()
     nick = member.get("nick") or user["username"]
