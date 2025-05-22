@@ -5,10 +5,10 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
+from requests_oauthlib import OAuth2Session
 import requests
 import re
 import uuid
-from urllib.parse import quote, urlencode
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -160,46 +160,46 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
-    params = st.query_params
+    client_id = st.secrets["DISCORD_CLIENT_ID"]
+    client_secret = st.secrets["DISCORD_CLIENT_SECRET"]
+    redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
+    scope = ["identify"]
 
-    if "code" not in params:
-        client_id = st.secrets["DISCORD_CLIENT_ID"]
-        redirect_uri = st.secrets["DISCORD_REDIRECT_URI"]
-        auth_url = (
-            "https://discord.com/api/oauth2/authorize?"
-            f"client_id={client_id}"
-            f"&redirect_uri={redirect_uri}"
-            "&response_type=code"
-            "&scope=identify"
+    if "oauth_state" not in st.session_state:
+        oauth = OAuth2Session(client_id, redirect_uri=redirect_uri, scope=scope)
+        auth_url, state = oauth.authorization_url(
+            "https://discord.com/api/oauth2/authorize"
         )
+        st.session_state["oauth_state"] = state
+        st.session_state["oauth_client"] = oauth
         st.markdown(f"[🔐 Iniciar sesión con Discord]({auth_url})")
         st.stop()
 
-    code = params["code"][0]
-    token_resp = requests.post(
-        "https://discord.com/api/oauth2/token",
-        data={
-            "client_id": st.secrets["DISCORD_CLIENT_ID"],
-            "client_secret": st.secrets["DISCORD_CLIENT_SECRET"],
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": st.secrets["DISCORD_REDIRECT_URI"],
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+    params = st.query_params
+    code = params.get("code", [None])[0]
+    state = params.get("state", [None])[0]
 
-    if token_resp.status_code != 200:
-        st.query_params = {}
-        st.error("Token exchange falló:\n" + token_resp.text)
+    if not code or state != st.session_state["oauth_state"]:
+        st.session_state.pop("oauth_state", None)
+        st.error("Fallo en el estado de OAuth2. Intenta de nuevo.")
         st.stop()
 
-    access_token = token_resp.json()["access_token"]
+    oauth = OAuth2Session(
+        client_id,
+        redirect_uri=redirect_uri,
+        state=state,
+    )
+    token = oauth.fetch_token(
+        "https://discord.com/api/oauth2/token",
+        client_secret=client_secret,
+        code=code,
+    )
+
+    st.session_state.pop("oauth_state", None)
+    st.session_state.pop("oauth_client", None)
     st.query_params = {}
 
-    user = requests.get(
-        "https://discord.com/api/users/@me",
-        headers={"Authorization": f"Bearer {access_token}"},
-    ).json()
+    user = oauth.get("https://discord.com/api/users/@me").json()
     user_id = user["id"]
 
     member = requests.get(
