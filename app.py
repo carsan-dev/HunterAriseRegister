@@ -8,7 +8,7 @@ from supabase import create_client
 import requests
 import re
 import uuid
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 ESP = ZoneInfo("Europe/Madrid")
 SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
@@ -161,7 +161,7 @@ def save_payment(fecha, miembro, dias, cantidad, captura_path):
 
 
 def authenticate_discord():
-    params = st.experimental_get_query_params()
+    params = st.query_params
     if "code" not in params:
         state = uuid.uuid4().hex
         st.session_state["oauth_state"] = state
