@@ -167,14 +167,17 @@ def start_challenge():
     with start_ph.form("start_challenge", clear_on_submit=True):
         user_id = st.text_input("🔑 Escribe tu Discord user ID")
         submitted = st.form_submit_button("Enviar")
-    if submitted and user_id:
-        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        st.session_state["challenge"] = code
-        st.session_state["candidate_id"] = user_id
-        st.session_state["step"] = 2
-        send_challenge_dm(user_id, code)
-        st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
-        start_ph.empty()
+    if submitted:
+        if not re.fullmatch(r"\d{17,19}", user_id):
+            st.error("ID incorrecto. Introduce tu ID de Discord y vuelve a intentarlo")
+        else:
+            code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            st.session_state["challenge"] = code
+            st.session_state["candidate_id"] = user_id
+            st.session_state["step"] = 2
+            send_challenge_dm(user_id, code)
+            st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
+            start_ph.empty()
 
 
 def send_challenge_dm(user_id, code):
@@ -204,7 +207,7 @@ def verify_challenge():
     if not submit:
         st.stop()
     if entry != st.session_state.get("challenge", ""):
-        st.error("Código incorrecto. Reintenta.")
+        st.error("Código incorrecto. Introduce un código válido y reintenta.")
         st.stop()
     token = st.secrets["DISCORD_BOT_TOKEN"]
     guild_id = st.secrets["DISCORD_GUILD_ID"]
