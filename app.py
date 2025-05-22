@@ -164,15 +164,16 @@ def authenticate_discord():
     if "user_id" in st.session_state and "nick" in st.session_state:
         return st.session_state["user_id"], st.session_state["nick"]
 
-    if "challenge" not in st.session_state:
+    if "step" not in st.session_state:
         st.session_state["step"] = 1
 
-    if st.session_state.get("step") == 1:
+    if st.session_state["step"] == 1:
         user_id = st.text_input("🔑 Escribe tu Discord user ID")
         if user_id:
             code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
             st.session_state["challenge"] = code
             st.session_state["candidate_id"] = user_id
+            st.session_state["step"] = 2
 
             dm = requests.post(
                 "https://discord.com/api/v10/users/@me/channels",
@@ -186,13 +187,12 @@ def authenticate_discord():
                 json={"content": f"Tu código de autenticación es: **{code}**"},
             )
 
-            st.session_state["step"] = 2
-            st.experimental_rerun()
+            st.stop()
 
-    if st.session_state.get("step") == 2:
+    if st.session_state["step"] == 2:
         entry = st.text_input("📩 Escribe el código que recibiste por DM")
         if entry:
-            if entry == st.session_state.get("challenge"):
+            if entry == st.session_state["challenge"]:
                 user_id = st.session_state["candidate_id"]
                 member = requests.get(
                     f"https://discord.com/api/v10/guilds/{st.secrets['DISCORD_GUILD_ID']}"
