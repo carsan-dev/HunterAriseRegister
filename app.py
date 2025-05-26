@@ -174,10 +174,10 @@ def start_challenge():
             code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
             st.session_state["challenge"] = code
             st.session_state["candidate_id"] = user_id
-            st.session_state["step"] = 2
-            send_challenge_dm(user_id, code)
-            st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
-            start_ph.empty()
+            if send_challenge_dm(user_id, code):
+                st.session_state["step"] = 2
+                st.success("Código enviado por DM. Revisa tu bandeja de entrada.")
+                start_ph.empty()
 
 
 def send_challenge_dm(user_id, code):
@@ -186,15 +186,32 @@ def send_challenge_dm(user_id, code):
         "https://discord.com/api/v10/users/@me/channels",
         headers={"Authorization": f"Bot {token}"},
         json={"recipient_id": user_id},
-    ).json()
-    channel_id = dm["id"]
+    )
+    dm_json = dm.json()
+    if dm.status_code != 200 or "id" not in dm_json:
+        st.error(
+            "No puedo enviarte el código por DM. "
+            "Ve a Ajustes de Usuario → Privacidad y Seguridad en Discord "
+            "y activa “Permitir mensajes directos de miembros del servidor”, "
+            "luego vuelve a intentarlo."
+        )
+        return False
+    channel_id = dm_json["id"]
     msg = requests.post(
         f"https://discord.com/api/v10/channels/{channel_id}/messages",
         headers={"Authorization": f"Bot {token}"},
         json={"content": f"Tu código de autenticación es: **{code}**"},
-    ).json()
+    )
+    msg_json = msg.json()
+    if msg.status_code != 200 or "id" not in msg_json:
+        st.error(
+            "No pude enviarte el mensaje con el código. "
+            "Revisa tu configuración de privacidad en Discord."
+        )
+        return False
     st.session_state["challenge_channel_id"] = channel_id
-    st.session_state["challenge_message_id"] = msg["id"]
+    st.session_state["challenge_message_id"] = msg_json["id"]
+    return True
 
 
 def verify_challenge():
