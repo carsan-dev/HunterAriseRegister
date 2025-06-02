@@ -12,7 +12,7 @@ from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
 
 ESP = ZoneInfo("Europe/Madrid")
-SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000}
+SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000, "oc": 1000000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -35,7 +35,7 @@ def parse_quantity(qstr):
 
 
 def format_quantity(units):
-    for suf in ("sp", "sx", "qi"):
+    for suf in ("oc", "sp", "sx", "qi"):
         mul = SUFFIX_MAP[suf]
         val = units / mul
         if val >= 1:
@@ -224,7 +224,7 @@ def verify_challenge():
     if not submit:
         st.stop()
     if entry != st.session_state.get("challenge", ""):
-        st.error("Código incorrecto. Introduce un código válido y reintenta.")
+        st.error("Código incorrecto. Reintenta.")
         st.stop()
     token = st.secrets["DISCORD_BOT_TOKEN"]
     guild_id = st.secrets["DISCORD_GUILD_ID"]
@@ -272,10 +272,10 @@ def render_payment_form(user_id, nick, config):
     seleccion = st.multiselect("Pagar donación para", opciones, default=["Yo"])
     id_map = {n: u for u, n in zip(config["user_id"], config["nick"])}
     paid_str = st.text_input(
-        "Cantidad pagada", value="1sx", help="Ejemplo: 1sx, 1.5sp, 500qi"
+        "Cantidad pagada", value="1sx", help="Ejemplo: 500qi, 1sx, 1.5sp, 2oc"
     )
     rate_str = st.text_input(
-        "SX por día", value="1sx", help="Ejemplo: 1sx, 1.5sp, 500qi"
+        "SX por día", value="100sx", help="Ejemplo: Pago diario de 100sx, se pone 100sx"
     )
     try:
         paid_qi = parse_quantity(paid_str)
