@@ -12,7 +12,7 @@ from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
 
 ESP = ZoneInfo("Europe/Madrid")
-SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000, "oc": 10**48}
+SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000, "oc": 1000000000}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
