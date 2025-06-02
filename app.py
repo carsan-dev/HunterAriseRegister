@@ -12,7 +12,7 @@ from streamlit_autorefresh import st_autorefresh
 from supabase import create_client
 
 ESP = ZoneInfo("Europe/Madrid")
-SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000, "oc": 1000000000}
+SUFFIX_MAP = {"qi": 1, "sx": 1000, "sp": 1000000, "oc": 10**48}
 RAW_COLS = ["Fecha", "Miembro", "Dias", "Cantidad", "Captura"]
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
@@ -272,7 +272,7 @@ def render_payment_form(user_id, nick, config):
     seleccion = st.multiselect("Pagar donación para", opciones, default=["Yo"])
     id_map = {n: u for u, n in zip(config["user_id"], config["nick"])}
     paid_str = st.text_input(
-        "Cantidad pagada", value="1sx", help="Ejemplo: 500qi, 1sx, 1.5sp, 2oc"
+        "Cantidad pagada", value="100sx", help="Ejemplo: 100sx, 1.5sp, 2oc"
     )
     rate_str = st.text_input(
         "SX por día", value="100sx", help="Ejemplo: Pago diario de 100sx, se pone 100sx"
